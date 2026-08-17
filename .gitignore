@@ -399,3 +399,10 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# ── Lokalne tajne (Uslužionica) ──────────────────────────────────────────────
+# Prave vrednosti idu ovde; appsettings.json/Development.json drže samo prazne
+# placeholder-e. Šablon je u appsettings.Local.json.example (koji JESTE u git-u).
+appsettings.Local.json
+appsettings.*.Local.json
+!appsettings.Local.json.example

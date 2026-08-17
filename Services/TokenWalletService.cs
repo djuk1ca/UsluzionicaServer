@@ -154,16 +154,42 @@ public sealed class TokenWalletService(
         var receiver = await db.Users.FindAsync(receiverId);
         if (receiver is null) return (false, "Korisnik nije pronađen.");
 
-        // Atomična provera balansa pošiljaoca (može se promeniti između kreiranja i prihvatanja)
-        if (offer.Sender.TokenBalance < offer.TokenAmount)
-            return (false, $"Pošiljalac nema dovoljno tokena " +
-                           $"(trenutni balans: {offer.Sender.TokenBalance:0.##}).");
-
         var now = DateTime.UtcNow;
 
-        // Transfer
-        offer.Sender.TokenBalance -= offer.TokenAmount;
-        receiver.TokenBalance     += offer.TokenAmount;
+        // ── Transfer u transakciji ─────────────────────────────────────────
+        // Isti obrazac kao u BoostService: provera i oduzimanje moraju biti
+        // JEDNA SQL naredba. Ranije je ovde bilo pročitaj → uporedi → oduzmi,
+        // pa su dva istovremena prihvatanja mogla oba proći i odvesti
+        // pošiljaočev balans u minus.
+        await using var trx = await db.Database.BeginTransactionAsync();
+
+        var affected = await db.Users
+            .Where(u => u.Id == offer.SenderId && u.TokenBalance >= offer.TokenAmount)
+            .ExecuteUpdateAsync(s => s.SetProperty(
+                u => u.TokenBalance,
+                u => u.TokenBalance - offer.TokenAmount));
+
+        if (affected == 0)
+        {
+            await trx.RollbackAsync();
+
+            var trenutni = await db.Users
+                .Where(u => u.Id == offer.SenderId)
+                .Select(u => u.TokenBalance)
+                .FirstOrDefaultAsync();
+
+            return (false, $"Pošiljalac nema dovoljno tokena " +
+                           $"(trenutni balans: {trenutni:0.##}).");
+        }
+
+        // ExecuteUpdateAsync zaobilazi change tracker — praćeni offer.Sender je
+        // sada zastareo. Balans čitamo ponovo da bi BalanceAfter bio tačan.
+        var balansPosiljaoca = await db.Users
+            .Where(u => u.Id == offer.SenderId)
+            .Select(u => u.TokenBalance)
+            .FirstAsync();
+
+        receiver.TokenBalance += offer.TokenAmount;
 
         offer.Status      = DiscountOfferStatus.Accepted;
         offer.RespondedAt = now;
@@ -176,7 +202,7 @@ public sealed class TokenWalletService(
             Kind         = TokenKind.DiscountSent,
             Description  = $"Token popust poslan za \"{offer.Listing.Title}\"",
             ReferenceId  = offer.Id,
-            BalanceAfter = offer.Sender.TokenBalance,
+            BalanceAfter = balansPosiljaoca,
             CreatedAt    = now
         });
 
@@ -193,6 +219,10 @@ public sealed class TokenWalletService(
         });
 
         await db.SaveChangesAsync();
+
+        // Transfer je konačan tek ovde — obe strane balansa, oba ledger zapisa
+        // i status ponude idu zajedno ili nikako.
+        await trx.CommitAsync();
 
         await notificationService.SendAsync(
             offer.SenderId,

@@ -7,5 +7,6 @@ public enum TokenKind
     BoostSpend,
     DiscountSent,
     DiscountReceived,
-    Referral
+    Referral,
+    AdminGrant
 }

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using UsluzionicaServer.Persistence;
 
@@ -11,9 +12,11 @@ using UsluzionicaServer.Persistence;
 namespace UsluzionicaServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260807220742_NormalizeMediaUrlsToRelative")]
+    partial class NormalizeMediaUrlsToRelative
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -2204,42 +2207,6 @@ namespace UsluzionicaServer.Migrations
                     b.ToTable("Notifications");
                 });
 
-            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.PasswordResetCode", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("int");
-
-                    b.Property<string>("CodeHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("nvarchar(64)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<DateTime?>("UsedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("UserId")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(450)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("UserId", "UsedAt");
-
-                    b.ToTable("PasswordResetCodes");
-                });
-
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ProviderCategory", b =>
                 {
                     b.Property<int>("ProviderProfileId")
@@ -2794,17 +2761,6 @@ namespace UsluzionicaServer.Migrations
                 {
                     b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "User")
                         .WithMany("Notifications")
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.PasswordResetCode", b =>
-                {
-                    b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "User")
-                        .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

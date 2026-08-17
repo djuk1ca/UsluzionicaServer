@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Unit testovi — ČISTE funkcije, bez baze, bez HTTP-a, bez fajl sistema.
+    Ovde idu samo stvari koje su ulaz → izlaz: SearchNormalizer, MediaUrls,
+    SecretsGuard, TokenService, MessageEncryption.
+
+    Poslovna pravila (booking, tokeni, referral) NISU ovde — ona žive u
+    servisima koji su neodvojivi od baze, pa idu u IntegrationTests.
+    Vidi tests/README.md za obrazloženje.
+
+    TargetFramework, xunit, FluentAssertions i coverlet dolaze iz
+    ../Directory.Build.props — zato ih ovde nema.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\UsluzionicaServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- NSubstitute se koristi samo tamo gde postoji interfejs (npr. IEmailService).
+         Servisi su `sealed` bez interfejsa i NE mogu se mock-ovati — to je
+         namerno rešeno kroz DI u integracionim testovima. -->
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>

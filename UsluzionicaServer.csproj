@@ -6,6 +6,18 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!--
+    Test projekti žive u tests/ PODFOLDERU ovog projekta (jer je repo root ovde).
+    Web SDK podrazumevano hvata **/*.cs, pa bi bez ovoga pokušao da kompajlira
+    i test fajlove kao deo servera — što puca jer server nema xunit reference.
+  -->
+  <ItemGroup>
+    <Compile          Remove="tests/**" />
+    <Content          Remove="tests/**" />
+    <None             Remove="tests/**" />
+    <EmbeddedResource Remove="tests/**" />
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="6.6.2" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.4" />

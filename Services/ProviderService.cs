@@ -5,6 +5,7 @@ using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Listings;
 using UsluzionicaServer.DTOs.Provider;
 using UsluzionicaServer.Infrastructure;
+using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
@@ -186,13 +187,14 @@ public sealed class ProviderService(
         await using (var stream = File.Create(filePath))
             await file.CopyToAsync(stream);
 
-        var baseUrl = config["App:BaseUrl"] ?? "https://localhost:7176";
-        var url     = $"{baseUrl}/uploads/covers/{fileName}";
-
-        profile.CoverImageUrl = url;
+        // U bazu ide RELATIVNA putanja; vidi MediaUrls / MediaUrlJsonModifier.
+        var relativeUrl = $"/uploads/covers/{fileName}";
+        profile.CoverImageUrl = relativeUrl;
         await db.SaveChangesAsync();
 
-        return (url, null);
+        // Vraća se pun URL jer ovaj metod ne prolazi kroz DTO serijalizaciju.
+        var absoluteUrl = MediaUrls.ToAbsolute(relativeUrl, config["App:BaseUrl"] ?? string.Empty)!;
+        return (absoluteUrl, null);
     }
 
     // ── LISTINZI PROVAJDERA (javno) ────────────────────────────────────────

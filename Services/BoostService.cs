@@ -57,22 +57,59 @@ public sealed class BoostService(
         if (listing.ProviderProfile.UserId != userId)
             return (false, "Možete boostovati samo sopstvene listinge.");
 
-        // Provera balansa
-        var user = await db.Users.FindAsync(userId);
-        if (user is null) return (false, "Korisnik nije pronađen.");
-
-        if (user.TokenBalance < dto.TokensToSpend)
-            return (false, $"Nedovoljno tokena. Vaš balans: {user.TokenBalance:0.##}, " +
-                           $"potrebno: {dto.TokensToSpend:0.##}.");
-
         var now        = DateTime.UtcNow;
         var expiresAt  = now.AddDays(dto.DurationDays);
 
         // BoostScore delta: tokeni / dani
         var boostDelta = Math.Round(dto.TokensToSpend / dto.DurationDays, 4);
 
-        // 1. Dedukuj tokene
-        user.TokenBalance -= dto.TokensToSpend;
+        // ── Transakcija oko celog troška ───────────────────────────────────
+        // Bez nje bi pad procesa između skidanja tokena i upisa ListingBoost-a
+        // ostavio korisnika bez tokena i bez boosta.
+        await using var trx = await db.Database.BeginTransactionAsync();
+
+        // 1. Dedukuj tokene — ATOMIČNO.
+        //
+        // Ranije je ovde bilo: pročitaj balans → uporedi u memoriji → oduzmi.
+        // Između čitanja i upisa postoji prozor u kojem drugi zahtev pročita
+        // isti balans, pa oba prođu proveru i balans ode u minus.
+        // (Test TokenConcurrencyTests je to dokazao: 8 paralelnih zahteva sa
+        //  balansom za jedan boost — svih 8 je prošlo.)
+        //
+        // Sada provera i oduzimanje idu u JEDNOJ SQL naredbi:
+        //   UPDATE AspNetUsers SET TokenBalance = TokenBalance - @x
+        //   WHERE Id = @id AND TokenBalance >= @x
+        // Baza drži ekskluzivnu bravu na redu, pa drugi zahtev čeka i tek
+        // potom ponovo proverava uslov — nad već umanjenim balansom.
+        var affected = await db.Users
+            .Where(u => u.Id == userId && u.TokenBalance >= dto.TokensToSpend)
+            .ExecuteUpdateAsync(s => s.SetProperty(
+                u => u.TokenBalance,
+                u => u.TokenBalance - dto.TokensToSpend));
+
+        if (affected == 0)
+        {
+            // Nula pogođenih redova znači da uslov TokenBalance >= iznos nije
+            // zadovoljen. (Da korisnik ne postoji, ranija provera vlasništva
+            // listinga bi već pukla.)
+            await trx.RollbackAsync();
+
+            var trenutni = await db.Users
+                .Where(u => u.Id == userId)
+                .Select(u => u.TokenBalance)
+                .FirstOrDefaultAsync();
+
+            return (false, $"Nedovoljno tokena. Vaš balans: {trenutni:0.##}, " +
+                           $"potrebno: {dto.TokensToSpend:0.##}.");
+        }
+
+        // ExecuteUpdateAsync zaobilazi change tracker, pa je eventualna praćena
+        // instanca korisnika sada zastarela. Balans čitamo ponovo iz baze da bi
+        // BalanceAfter u ledgeru bio tačan.
+        var balansPosle = await db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.TokenBalance)
+            .FirstAsync();
 
         // 2. TokenTransaction (audit)
         db.TokenTransactions.Add(new TokenTransaction
@@ -83,7 +120,7 @@ public sealed class BoostService(
             Description  = $"Boost \"{listing.Title}\" — {dto.DurationDays} dana " +
                            $"(+{boostDelta:0.####} BoostScore)",
             ReferenceId  = listingId,
-            BalanceAfter = user.TokenBalance,
+            BalanceAfter = balansPosle,
             CreatedAt    = now
         });
 
@@ -109,6 +146,10 @@ public sealed class BoostService(
             : expiresAt;
 
         await db.SaveChangesAsync();
+
+        // Tek sada je trošak konačan — skidanje tokena, ledger zapis, boost i
+        // izmena listinga su ili svi upisani ili nijedan.
+        await trx.CommitAsync();
 
         logger.LogInformation(
             "Listing #{Id} boost: +{Delta} BoostScore, novi total: {Total}, " +

@@ -5,7 +5,7 @@ using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
 
-public sealed class AdminService(AppDbContext db)
+public sealed class AdminService(AppDbContext db, NotificationService notificationService)
 {
     // ── KORISNICI ──────────────────────────────────────────────────────────
 
@@ -51,6 +51,45 @@ public sealed class AdminService(AppDbContext db)
                 u => !u.IsActive));
 
         return updated > 0;
+    }
+
+    /// <summary>Admin ručno dodeljuje tokene korisniku (npr. kompenzacija, promocija).
+    /// Upisuje se u ledger kao AdminGrant transakcija i šalje se notifikacija korisniku.</summary>
+    public async Task<(bool Success, string? Error, decimal? NewBalance)> GrantTokensAsync(
+        string userId, decimal amount, string? note)
+    {
+        if (amount <= 0)
+            return (false, "Iznos mora biti veći od nule.", null);
+
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        if (user is null)
+            return (false, "Korisnik nije pronađen.", null);
+
+        var now = DateTime.UtcNow;
+        var description = string.IsNullOrWhiteSpace(note)
+            ? "Tokeni dodeljeni od strane administratora."
+            : note.Trim();
+
+        user.TokenBalance += amount;
+
+        db.TokenTransactions.Add(new Domain.Entities.TokenTransaction
+        {
+            UserId       = user.Id,
+            Amount       = amount,
+            Kind         = TokenKind.AdminGrant,
+            Description  = description,
+            BalanceAfter = user.TokenBalance,
+            CreatedAt    = now
+        });
+
+        await db.SaveChangesAsync();
+
+        await notificationService.SendAsync(
+            user.Id, NotificationKind.TokenEarned,
+            "Dodeljeni tokeni",
+            $"Administrator ti je dodelio {amount:0.##} tokena.");
+
+        return (true, null, user.TokenBalance);
     }
 
     // ── LISTINZI ───────────────────────────────────────────────────────────

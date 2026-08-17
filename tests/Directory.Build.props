@@ -1,0 +1,50 @@
+<Project>
+
+  <!--
+    Zajednička podešavanja za SVE test projekte u tests/ folderu.
+    MSBuild automatski pronalazi najbliži Directory.Build.props uz putanju
+    naviše, pa test projekti ovo nasleđuju bez ijedne linije u svom .csproj-u.
+
+    Zašto ovde a ne u svakom .csproj: kad dodaš treći test projekat, ne moraš
+    da se sećaš da prepišeš isti blok.
+  -->
+
+  <PropertyGroup>
+    <!-- Prati TargetFramework servera (net8.0). Test projekat ne sme biti
+         noviji od projekta koji testira. -->
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+
+    <!-- Test projekti se ne pakuju niti objavljuju. -->
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+
+    <!-- Obavezno za `dotnet test` da prepozna projekat kao test projekat. -->
+    <IsTestProject>true</IsTestProject>
+
+    <!-- xUnit analizatori prijavljuju česte greške (npr. async test bez await,
+         Assert nad kolekcijom umesto Should().Contain()). Ne obaraju build. -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Sve što se ponavlja u svakom test projektu. Verzije se drže na jednom
+         mestu da se ne razilaze između projekata. -->
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <!-- FluentAssertions 8.x je promenio licencu na komercijalnu za poslovnu
+         upotrebu. 7.x je poslednja pod besplatnom Apache 2.0 licencom. -->
+    <PackageReference Include="FluentAssertions" Version="7.0.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

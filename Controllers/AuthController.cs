@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.DTOs.Auth;
 using UsluzionicaServer.Services;
@@ -18,6 +19,7 @@ public sealed class AuthController(
     /// Opcionalno polje referralCode za referral sistem.
     /// </summary>
     [HttpPost("register")]
+    [EnableRateLimiting("email")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
@@ -43,6 +45,7 @@ public sealed class AuthController(
     /// IP adresa se koristi za ažuriranje LastKnownCity.
     /// </summary>
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     [ProducesResponseType(typeof(AuthResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
@@ -133,11 +136,62 @@ public sealed class AuthController(
     /// Uvek vraća 200 — ne otkrivamo da li email postoji.
     /// </summary>
     [HttpPost("resend-verification")]
+    [EnableRateLimiting("email")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> ResendVerification([FromBody] ResendVerificationRequest req)
     {
         await authService.ResendVerificationAsync(req.Email);
         return Ok(new { success = true, message = "Ako nalog postoji i nije potvrđen, email je poslat." });
+    }
+
+    // ── POST /api/auth/forgot-password ───────────────────────────────────
+    /// <summary>
+    /// Šalje 6-cifreni kod za reset lozinke na email.
+    /// Uvek vraća 200 — ne otkrivamo da li nalog postoji.
+    /// </summary>
+    [HttpPost("forgot-password")]
+    [EnableRateLimiting("email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest req)
+    {
+        if (!ModelState.IsValid)
+            return BadRequest(new { success = false, message = "Unesi ispravnu email adresu." });
+
+        await authService.ForgotPasswordAsync(req.Email);
+
+        return Ok(new
+        {
+            success = true,
+            message = "Ako nalog sa tom adresom postoji, kod je poslat na email."
+        });
+    }
+
+    // ── POST /api/auth/reset-password ────────────────────────────────────
+    /// <summary>
+    /// Menja lozinku na osnovu koda iz emaila. Poništava sve aktivne sesije.
+    /// </summary>
+    [HttpPost("reset-password")]
+    [EnableRateLimiting("auth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req)
+    {
+        if (!ModelState.IsValid)
+        {
+            var first = ModelState.Values
+                .SelectMany(v => v.Errors)
+                .Select(e => e.ErrorMessage)
+                .FirstOrDefault() ?? "Podaci nisu ispravni.";
+            return BadRequest(new { success = false, message = first });
+        }
+
+        var (success, error) = await authService.ResetPasswordAsync(
+            req.Email, req.Code, req.NewPassword);
+
+        if (!success)
+            return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, message = "Lozinka je promenjena. Možeš se prijaviti." });
     }
 
     // ── HTML helper ────────────────────────────────────────────────────────

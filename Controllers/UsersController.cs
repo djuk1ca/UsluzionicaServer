@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using UsluzionicaServer.DTOs.Users;
 using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Services;
@@ -44,6 +45,27 @@ public sealed class UsersController(UserService userService) : ControllerBase
             return BadRequest(new { success = false, message = error });
 
         return Ok(new { success = true, message = "Profil ažuriran." });
+    }
+
+    // ── DELETE /api/users/me ──────────────────────────────────────────────
+    /// <summary>
+    /// Briše (anonimizuje) nalog prijavljenog korisnika. Zahteva lozinku.
+    /// Obavezno za App Store — smernica 5.1.1(v).
+    /// </summary>
+    [Authorize]
+    [HttpDelete("me")]
+    [EnableRateLimiting("auth")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeleteMe([FromBody] DeleteAccountDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var (success, error) = await userService.DeleteAccountAsync(userId, dto.Password);
+
+        if (!success)
+            return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, message = "Nalog je obrisan." });
     }
 
     // ── POST /api/users/me/avatar ─────────────────────────────────────────

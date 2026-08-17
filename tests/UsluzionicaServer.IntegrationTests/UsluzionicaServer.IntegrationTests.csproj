@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Integracioni testovi — prava SQL Server baza u Docker kontejneru
+    (Testcontainers), pravi DI kontejner, pravi HTTP kroz WebApplicationFactory.
+
+    Dva podsloja:
+      Services/  → servis pozvan direktno iz DI-ja. Testira poslovno pravilo.
+      Api/       → pravi HTTP zahtev. Testira rutiranje, auth, oblik odgovora.
+
+    ZAHTEVA POKRENUT DOCKER. Bez njega testovi padaju pri startu kontejnera.
+
+    TargetFramework, xunit, FluentAssertions i coverlet dolaze iz
+    ../Directory.Build.props.
+  -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\UsluzionicaServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Verzija MORA pratiti ASP.NET Core verziju servera (8.x) — inače
+         WebApplicationFactory ne ume da pokrene host. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+
+    <!-- Podiže pravi SQL Server u kontejneru. Alternativa (EF InMemory) nije
+         baza nego rečnik u memoriji: ne poštuje unique indekse, ne podržava
+         ExecuteDeleteAsync i ne izvršava SQL — za pretragu koja zavisi od
+         LIKE i collation-a davala bi lažno zeleno. -->
+    <PackageReference Include="Testcontainers.MsSql" Version="4.0.0" />
+
+    <!-- Briše redove između testova, ali čuva referentne podatke
+         (188 kategorija iz HasData, Identity role). Brže i pouzdanije od
+         rušenja i ponovnog kreiranja baze. -->
+    <PackageReference Include="Respawn" Version="6.2.1" />
+
+    <PackageReference Include="NSubstitute" Version="5.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="FluentAssertions" />
+  </ItemGroup>
+
+</Project>

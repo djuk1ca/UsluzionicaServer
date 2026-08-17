@@ -280,8 +280,9 @@ public sealed class ListingService(
         await using (var stream = File.Create(filePath))
             await file.CopyToAsync(stream);
 
-        var baseUrl  = config["App:BaseUrl"] ?? "https://localhost:7176";
-        var imageUrl = $"{baseUrl}/uploads/listings/{listingId}/{fileName}";
+        // Relativna putanja — pun URL sastavlja MediaUrlJsonModifier pri
+        // serijalizaciji, pa promena domena ne kvari postojeće slike.
+        var imageUrl = $"/uploads/listings/{listingId}/{fileName}";
 
         var sortOrder = existingImages.Count > 0
             ? existingImages.Max(i => i.SortOrder) + 1

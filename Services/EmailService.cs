@@ -8,7 +8,7 @@ namespace UsluzionicaServer.Services;
 /// Šalje transakcione emailove (verifikacija, reset lozinke) putem SMTP-a (MailKit).
 /// Konfiguracija se čita iz appsettings.json → "Email" sekcija.
 /// </summary>
-public sealed class EmailService(IConfiguration config, ILogger<EmailService> logger)
+public sealed class EmailService(IConfiguration config, ILogger<EmailService> logger) : IEmailService
 {
     private readonly string _host     = config["Email:Host"]     ?? "smtp.gmail.com";
     private readonly int    _port     = int.Parse(config["Email:Port"] ?? "587");
@@ -23,6 +23,12 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
             to:      toEmail,
             subject: "Potvrdi svoju Uslužionica adresu",
             html:    BuildVerificationHtml(fullName, verifyUrl));
+
+    public Task SendPasswordResetEmailAsync(string toEmail, string fullName, string resetCode)
+        => SendAsync(
+            to:      toEmail,
+            subject: "Reset lozinke — Uslužionica",
+            html:    BuildPasswordResetHtml(fullName, resetCode));
 
     // ── Interni helper ─────────────────────────────────────────────────────
 
@@ -75,6 +81,34 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
             </a>
             <p style="color:#94A3B8;font-size:12px;margin-bottom:0;">
               Link ističe za 24 sata. Ako nisi ti kreirao/la nalog, ignoriši ovaj email.
+            </p>
+          </div>
+        </body>
+        </html>
+        """;
+
+    private static string BuildPasswordResetHtml(string fullName, string code) => $"""
+        <!DOCTYPE html>
+        <html lang="sr">
+        <head><meta charset="UTF-8"></head>
+        <body style="font-family:Inter,Arial,sans-serif;background:#F7FAFC;margin:0;padding:32px;">
+          <div style="max-width:480px;margin:0 auto;background:#fff;border-radius:16px;
+                      padding:40px;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+            <h2 style="color:#0B1220;margin-top:0;">Reset lozinke</h2>
+            <p style="color:#334155;line-height:1.6;">
+              Zdravo {fullName}, stigao nam je zahtev za promenu lozinke na tvom nalogu.
+              Unesi ovaj kod u aplikaciji:
+            </p>
+            <div style="margin:28px 0;padding:20px;background:#F1F5F9;border-radius:12px;text-align:center;">
+              <span style="font-size:34px;font-weight:800;letter-spacing:10px;color:#2F6BFF;
+                           font-family:'Courier New',monospace;">{code}</span>
+            </div>
+            <p style="color:#334155;line-height:1.6;font-size:14px;margin-bottom:20px;">
+              Kod važi <strong>15 minuta</strong>.
+            </p>
+            <p style="color:#94A3B8;font-size:12px;margin-bottom:0;">
+              Ako nisi ti tražio/la promenu lozinke, slobodno ignoriši ovaj email —
+              tvoja lozinka ostaje nepromenjena. Nikome ne prosleđuj ovaj kod.
             </p>
           </div>
         </body>

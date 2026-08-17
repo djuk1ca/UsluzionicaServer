@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using UsluzionicaServer.DTOs.Admin;
 using UsluzionicaServer.Services;
 
 namespace UsluzionicaServer.Controllers;
@@ -31,6 +32,17 @@ public sealed class AdminController(AdminService adminService) : ControllerBase
             return NotFound(new { success = false, message = "Korisnik nije pronađen." });
 
         return Ok(new { success = true });
+    }
+
+    /// <summary>Admin ručno dodeljuje tokene korisniku (kompenzacija, promocija i sl.).</summary>
+    [HttpPost("users/{id}/grant-tokens")]
+    public async Task<IActionResult> GrantTokens(string id, [FromBody] GrantTokensDto dto)
+    {
+        var (success, error, newBalance) = await adminService.GrantTokensAsync(id, dto.Amount, dto.Note);
+        if (!success)
+            return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, data = new { tokenBalance = newBalance } });
     }
 
     // ── LISTINZI ───────────────────────────────────────────────────────────

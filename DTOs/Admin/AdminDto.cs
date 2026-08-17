@@ -68,3 +68,11 @@ public sealed class TokenAnalyticsDto
     public List<DailyTokenStat>        Purchases         { get; init; } = [];
     public Dictionary<string, decimal> TotalByKind       { get; init; } = [];
 }
+
+public sealed class GrantTokensDto
+{
+    [System.ComponentModel.DataAnnotations.Range(0.01, 1_000_000)]
+    public decimal Amount { get; init; }
+    [System.ComponentModel.DataAnnotations.MaxLength(300)]
+    public string? Note { get; init; }
+}

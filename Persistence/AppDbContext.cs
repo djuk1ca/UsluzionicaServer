@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     : IdentityDbContext<ApplicationUser>(options)
 {
     public DbSet<RefreshToken>        RefreshTokens        => Set<RefreshToken>();
+    public DbSet<PasswordResetCode>   PasswordResetCodes   => Set<PasswordResetCode>();
     public DbSet<Referral>            Referrals            => Set<Referral>();
     public DbSet<Category>            Categories           => Set<Category>();
     public DbSet<ProviderProfile>     ProviderProfiles     => Set<ProviderProfile>();
@@ -99,6 +100,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne(t => t.User)
              .WithMany(u => u.RefreshTokens)
              .HasForeignKey(t => t.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── PasswordResetCode ──────────────────────────────────────────────
+        builder.Entity<PasswordResetCode>(e =>
+        {
+            e.Property(c => c.CodeHash).HasMaxLength(64).IsRequired();
+            // Traženje aktivnog koda za korisnika ide po (UserId, UsedAt).
+            e.HasIndex(c => new { c.UserId, c.UsedAt });
+            e.HasOne(c => c.User)
+             .WithMany()
+             .HasForeignKey(c => c.UserId)
              .OnDelete(DeleteBehavior.Cascade);
         });
 
