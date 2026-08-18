@@ -119,9 +119,20 @@ jobs:
     needs: [unit-tests, integration-tests]
     if: always()
     permissions:
-      checks: write
+      contents: read          # potrebno za checkout ispod
+      checks: write           # test-reporter pravi Check run
       pull-requests: write
     steps:
+      # OVAJ KORAK JE OBAVEZAN, iako job ne gradi kod.
+      # dorny/test-reporter pokreće `git ls-files` da bi imena test fajlova iz
+      # .trx izveštaja povezao sa putanjama u repozitorijumu. Bez checkout-a
+      # nema .git foldera, pa git puca sa "exit code 128" i job pada — iako su
+      # svi testovi prošli. (Tačno to se desilo u prvom run-u.)
+      # REDOSLED JE BITAN: checkout podrazumevano radi `git clean -ffdx` i
+      # obrisao bi preuzete artefakte da ide posle njih.
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Preuzmi rezultate
         uses: actions/download-artifact@v4
         with:
@@ -129,8 +140,13 @@ jobs:
 
       - name: Prikaži rezultate testova
         uses: dorny/test-reporter@v1
+        # Izveštaj je pogodnost, ne kapija kvaliteta. Ako sam alat zakaže,
+        # CI ne sme postati crven — inače se navikneš da ignorišeš crveno.
+        continue-on-error: true
         with:
           name: Rezultati testova
           path: 'results/**/*.trx'
           reporter: dotnet-trx
+          # Ne obaraj ceo CI ako sam izveštaj zakaže — rezultati testova su
+          # merodavni, a oni se vide u prethodna dva job-a i u artefaktima.
           fail-on-error: false

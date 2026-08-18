@@ -18,18 +18,52 @@ namespace UsluzionicaServer.IntegrationTests.Infrastructure;
 /// </summary>
 public sealed class DatabaseFixture : IAsyncLifetime
 {
-    private readonly MsSqlContainer _container = new MsSqlBuilder()
-        .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
-        .Build();
-
-    private Respawner _respawner = null!;
+    private MsSqlContainer _container = null!;
+    private Respawner      _respawner = null!;
 
     public UsluzionicaWebFactory Factory { get; private set; } = null!;
     public string ConnectionString { get; private set; } = null!;
 
     public async Task InitializeAsync()
     {
-        await _container.StartAsync();
+        // Kontejner se gradi OVDE, ne u inicijalizatoru polja.
+        // Razlog: inicijalizator polja se izvršava u konstruktoru, a xUnit
+        // konstruiše fixture po testu koji ga traži — pa bi greška "Docker nije
+        // pokrenut" izbila 12 puta sa 12 identičnih stack trace-ova, umesto
+        // jednom sa jasnom porukom.
+        try
+        {
+            _container = new MsSqlBuilder()
+                .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+                .Build();
+
+            await _container.StartAsync();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException
+                                      || ex.Message.Contains("Docker", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                """
+
+                ══════════════════════════════════════════════════════════════
+                  INTEGRACIONI TESTOVI ZAHTEVAJU POKRENUT DOCKER
+                ══════════════════════════════════════════════════════════════
+
+                  Testcontainers podiže pravi SQL Server u kontejneru. Bez
+                  pokrenutog Docker-a to nije moguće.
+
+                  Šta uraditi:
+                    1. Pokreni Docker Desktop i sačekaj da ikona bude zelena
+                    2. Provera:  docker ps
+                    3. Ponovo:   dotnet test
+
+                  Ako ti Docker sada ne treba, pokreni samo unit testove:
+                    dotnet test tests/UsluzionicaServer.UnitTests
+
+                ══════════════════════════════════════════════════════════════
+                """, ex);
+        }
+
         ConnectionString = _container.GetConnectionString();
 
         // Env varijable se postavljaju PRE pravljenja hosta jer Program.cs
@@ -84,8 +118,11 @@ public sealed class DatabaseFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        await Factory.DisposeAsync();
-        await _container.DisposeAsync();
+        // Null provere jer se DisposeAsync poziva i kad InitializeAsync padne
+        // (npr. Docker nije pokrenut) — tada polja nisu popunjena i bez ovoga
+        // bi NullReferenceException zamaskirao pravu grešku.
+        if (Factory is not null)    await Factory.DisposeAsync();
+        if (_container is not null) await _container.DisposeAsync();
     }
 }
 

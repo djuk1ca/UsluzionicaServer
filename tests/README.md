@@ -21,6 +21,46 @@ dotnet test --filter "FullyQualifiedName~ReferralReward"
 
 ---
 
+## Šta Docker radi tokom testova
+
+Testcontainers podiže **pravu SQL Server bazu u kontejneru**, samo za vreme
+trajanja testova. Tvoja lokalna `UsluzionicaDB` se ne dira.
+
+Dižu se **dva** kontejnera:
+
+| Kontejner | Slika | Uloga |
+|---|---|---|
+| SQL Server | `mcr.microsoft.com/mssql/server:2022-latest` (2.34 GB) | baza za testove |
+| Ryuk | `testcontainers/ryuk:0.9.0` (28.7 MB) | čistač — briše kontejnere ako testovi puknu ili ih prekineš sa Ctrl+C |
+
+Ryuk diže sam Testcontainers; bez njega bi se posle svakog prekinutog run-a
+gomilali SQL Server kontejneri od po 2 GB.
+
+Tok: poveži se na Docker → digni Ryuk → digni SQL Server na **nasumičnom portu**
+→ čekaj dok `SELECT 1;` ne prođe → primeni 9 migracija + seed 188 kategorija →
+pokreni testove → obriši kontejner.
+
+**Prvi run je spor** (~2 min, povlači se slika od 2.34 GB). Svaki sledeći
+~10–25 s jer je slika keširana.
+
+### Zašto ne EF InMemory
+
+|  | InMemory | Pravi SQL Server |
+|---|---|---|
+| Unique indeksi | **ignoriše** | poštuje |
+| `ExecuteUpdateAsync` / `ExecuteDeleteAsync` | **ne podržava** | radi |
+| Transakcije i brave na redovima | **nema** | ima |
+| `LIKE`, collation, dijakritika | **nema** | ima |
+
+Konkretno: konkurentni test se oslanja na to da baza drži ekskluzivnu bravu —
+na InMemory ne bi dokazivao ništa. `ExecuteUpdateAsync` se koristi na 12 mesta
+u kodu. A pretraga (sledeća faza) zavisi od `LIKE` i collation-a.
+
+InMemory nije baza nego rečnik koji glumi bazu; test koji prolazi nad njim ne
+dokazuje da kod radi u produkciji.
+
+---
+
 ## Struktura i zašto je baš takva
 
 ```
