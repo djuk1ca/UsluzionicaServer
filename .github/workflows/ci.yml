@@ -313,7 +313,7 @@ jobs:
           path: results
 
       - name: Prikaži rezultate testova
-        uses: dorny/test-reporter@v1
+        uses: dorny/test-reporter@v3
         # Izveštaj je pogodnost, ne kapija kvaliteta. Ako sam alat zakaže,
         # CI ne sme postati crven — inače se navikneš da ignorišeš crveno.
         continue-on-error: true
