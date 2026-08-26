@@ -1,11 +1,11 @@
-﻿# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1
 
 # ═════════════════════════════════════════════════════════════════════════════
 # FAZA 1 — BUILD
 # SDK slika (~800 MB) ima kompajler i alate. Koristi se SAMO za građenje;
 # u finalnu sliku ne prelazi ništa osim rezultata publish-a.
 # ═════════════════════════════════════════════════════════════════════════════
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 # ── Layer caching ────────────────────────────────────────────────────────────
