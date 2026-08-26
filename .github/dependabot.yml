@@ -55,11 +55,18 @@ updates:
           - "*.StackExchangeRedis"
 
     ignore:
-      # .NET 9 nadogradnja je svesna odluka, ne automatski PR — traži izmenu
-      # TargetFramework-a, Docker slika i CI-ja. Patch i minor unutar 8.x prolaze.
-      - dependency-name: "Microsoft.EntityFrameworkCore*"
-        update-types: ["version-update:semver-major"]
-      - dependency-name: "Microsoft.AspNetCore.*"
+      # ── SVE GLAVNE VERZIJE SU ISKLJUČENE ───────────────────────────────────
+      # Naučeno na svojoj koži: prva runda je otvorila 12 PR-ova, od kojih je
+      # većina predlagala .NET 10 na projektu koji cilja net8.0 — svaki od njih
+      # je pao na buildu i potrošio po ~6 minuta CI vremena.
+      #
+      # Kod .NET-a glavna verzija paketa je vezana za TargetFramework. Prelazak
+      # na .NET 10 je svesna odluka koja traži izmenu .csproj-a, Docker slika,
+      # CI-ja i ponovno testiranje — nikad automatski PR.
+      #
+      # Patch i minor unutar 8.x i dalje prolaze, a to je ono što nosi
+      # bezbednosne zakrpe.
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
   # ── GitHub Actions ────────────────────────────────────────────────────────
@@ -85,3 +92,13 @@ updates:
     labels: ["dependencies", "docker"]
     commit-message:
       prefix: "docker"
+    ignore:
+      # Bez ovoga Dependabot predlaže `dotnet/sdk:10.0` i `dotnet/aspnet:10.0`
+      # na projektu koji cilja net8.0. Slika i .csproj MORAJU biti na istoj
+      # glavnoj verziji — .NET 10 runtime ne pokreće net8.0 build bez izmene
+      # TargetFramework-a.
+      #
+      # Zakrpe Debian-a i .NET-a i dalje stižu: tag `8.0` se sam pomera na
+      # najnoviju 8.0.x sliku pri svakom `docker pull`.
+      - dependency-name: "mcr.microsoft.com/dotnet/*"
+        update-types: ["version-update:semver-major"]
