@@ -69,7 +69,7 @@ jobs:
 
       - name: Odredi tagove
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # Dva taga na istoj slici, i oba su potrebna:
