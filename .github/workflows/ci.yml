@@ -195,7 +195,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Preuzmi rezultate oba test job-a
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: results
 
@@ -308,7 +308,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Preuzmi rezultate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: results
 
