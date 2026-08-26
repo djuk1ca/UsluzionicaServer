@@ -334,7 +334,15 @@ jobs:
   #    ako je bilo koji od njegovih `needs` pao.
   # ──────────────────────────────────────────────────────────────────────────
   ci-ok:
-    name: CI prošao
+    # IME JE NAMERNO BEZ DIJAKRITIKE — ne menjaj ga.
+    #
+    # Ovo ime se RUČNO prekucava u branch protection ruleset i GitHub ga poredi
+    # doslovno, znak po znak. Sa "š" je previše lako upisati "CI prosao" i dobiti
+    # pravilo koje večno čeka check koji se nikad ne pojavljuje — merge tada
+    # ne prolazi nikad, a greška ne piše nigde.
+    #
+    # Ako ovo ime ikad promeniš, MORAŠ ga promeniti i u ruleset-u.
+    name: CI prosao
     runs-on: ubuntu-latest
     if: always()
     needs: [quality, unit-tests, integration-tests, coverage, docker-build]
