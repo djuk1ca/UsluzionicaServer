@@ -121,7 +121,7 @@ jobs:
 
       - name: Objavi rezultate
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: unit-test-results
           path: TestResults/
@@ -172,7 +172,7 @@ jobs:
 
       - name: Objavi rezultate
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-results
           path: TestResults/
@@ -249,7 +249,7 @@ jobs:
 
       - name: Objavi HTML izveštaj
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-report
           path: coverage-report/
