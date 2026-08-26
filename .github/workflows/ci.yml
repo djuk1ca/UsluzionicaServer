@@ -191,6 +191,18 @@ jobs:
     permissions:
       contents: read
       pull-requests: write     # da može da ostavi komentar sa izveštajem
+      # OBAVEZNO za download-artifact, i lako se promaši.
+      #
+      # Čim job navede `permissions:`, SVE što nije navedeno postaje `none` —
+      # ne nasleđuje se podrazumevano. `download-artifact` čita Artifacts API,
+      # pa bez `actions: read` dobija 403 i pokušava ponovo dok ne odustane:
+      #   "Artifact download failed after 5 retries"
+      #
+      # Poruka ni jednom rečju ne pominje dozvole, pa deluje kao problem sa
+      # mrežom ili verzijom akcije. Upload NE traži ovu dozvolu — zato su
+      # unit-tests i integration-tests radili, a padala su samo ova dva job-a,
+      # jedina koja uopšte deklarišu `permissions:`.
+      actions: read
     steps:
       - uses: actions/checkout@v4
 
@@ -296,6 +308,7 @@ jobs:
       contents: read          # potrebno za checkout ispod
       checks: write           # test-reporter pravi Check run
       pull-requests: write
+      actions: read           # download-artifact — vidi objašnjenje u `coverage`
     steps:
       # OVAJ KORAK JE OBAVEZAN, iako job ne gradi kod.
       # dorny/test-reporter pokreće `git ls-files` da bi imena test fajlova iz
