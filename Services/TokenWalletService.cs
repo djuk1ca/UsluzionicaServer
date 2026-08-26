@@ -333,15 +333,26 @@ public sealed class TokenWalletService(
         {
             TotalInvited        = referrals.Count,
             TotalBecameProvider = referrals.Count(r => r.Status == ReferralStatus.Rewarded),
-            TotalPending        = referrals.Count(r => r.Status == ReferralStatus.Pending),
-            TotalTokensEarned   = referrals.Sum(r => r.TokensAwarded ?? 0m),
+
+            // "Pending" iz ugla korisnika = pozvan ali još nije provajder.
+            // To su i Pending (nije potvrdio email) i Registered (jeste, ali
+            // nije aktivirao provajdera) — obe su nedovršene.
+            TotalPending        = referrals.Count(r => r.Status != ReferralStatus.Rewarded),
+
+            // Zbir OBE rate. Da je ostalo samo na drugoj, korisnik bi u
+            // statistici video manje tokena nego što mu je stvarno leglo.
+            TotalTokensEarned   = referrals.Sum(r => r.TotalTokensAwarded),
+
             Referrals = referrals.Select(r => new ReferralEntryDto
             {
-                InviteeName  = r.ReferredUser?.FullName ?? "Nepoznat",
-                Status       = r.Status.ToString(),
-                InvitedAt    = r.CreatedAt,
-                RewardedAt   = r.RewardedAt,
-                TokensEarned = r.TokensAwarded
+                InviteeName        = r.ReferredUser?.FullName ?? "Nepoznat",
+                Status             = r.Status.ToString(),
+                InvitedAt          = r.CreatedAt,
+                SignupRewardedAt   = r.SignupRewardedAt,
+                RewardedAt         = r.ActivationRewardedAt,
+                SignupTokens       = r.SignupTokensAwarded,
+                ActivationTokens   = r.ActivationTokensAwarded,
+                TokensEarned       = r.TotalTokensAwarded
             }).ToList()
         };
     }

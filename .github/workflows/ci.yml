@@ -1,7 +1,7 @@
 name: CI
 
 # Okida se na svaki push i na svaki PR ka main.
-# Cilj: nijedna promena ne stiže na main a da testovi nisu prošli.
+# Cilj: nijedna promena ne stiže na main a da nije prošla sve kapije ispod.
 on:
   push:
     branches: [main]
@@ -9,20 +9,86 @@ on:
     branches: [main]
   workflow_dispatch:        # ručno pokretanje iz GitHub UI-ja
 
+# ── Concurrency ─────────────────────────────────────────────────────────────
+# Kad pushuješ dvaput za minut, prvi build postaje nezanimljiv čim krene drugi.
+# Bez ovoga oba idu do kraja i troše minute (i čekaš duže na red).
+#
+# `group` mora biti različit po grani — inače bi push na jednu granu otkazivao
+# build druge. `github.ref` je puno ime grane, pa je to tačno to.
+#
+# cancel-in-progress: false na main-u bi bio bezbedniji za deploy, ali CI ovde
+# ništa ne objavljuje, pa je otkazivanje čisto dobitak.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_NOLOGO: true
-  # Testcontainers ne treba da proverava verziju u svakom run-u.
   TESTCONTAINERS_RYUK_DISABLED: false
+
+  # Prag pokrivenosti linija.
+  #
+  # IZMERENO 2026-08-26: 82.52% linija, 64.94% grana (207 testova).
+  # Prag je namerno NIŽI od izmerenog — nije cilj nego kočnica: postoji da bi se
+  # primetio PAD, ne da bi se jurio broj. ~7 poena rezerve pokriva normalno
+  # kolebanje kad se doda kod koji još nema test.
+  #
+  # Meri se SAMO kod koji smo mi napisali — coverlet.runsettings isključuje
+  # EF migracije, generisan kod i Program.cs. Bez tih izuzeća broj je naduvan:
+  # generisan regex je bio na 91% i sam dizao ukupan procenat.
+  MIN_COVERAGE: 75
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # Unit testovi — bez Dockera, gotovi za sekunde. Namerno odvojeni da bi
-  # greška u čistoj logici pala brzo, bez čekanja na SQL Server kontejner.
+  # 1. KVALITET KODA — najbrža kapija, pada za ~30 s ako nešto nije u redu.
+  #    Ide prvi da ne čekaš 3 minuta na testove pa da saznaš da fali razmak.
+  # ──────────────────────────────────────────────────────────────────────────
+  quality:
+    name: Kvalitet koda
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Postavi .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Keširaj NuGet pakete
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore UsluzionicaServer.sln
+
+      # -warnaserror: upozorenje koje niko ne popravi je upozorenje koje niko ne
+      # čita. Ovim postaje greška i mora se rešiti odmah.
+      - name: Build (upozorenja = greške)
+        run: dotnet build UsluzionicaServer.sln --no-restore --configuration Release -warnaserror
+
+      # NAMERNO se NE pokreće `dotnet format whitespace`.
+      # Ovaj kod poravnava deklaracije u kolone, a formatter to smatra greškom i
+      # sabio bi sve na jedan razmak. Ne postoji .editorconfig opcija koja to
+      # isključuje — .NET formatter nema pojam "align consecutive assignments".
+      # `style` i `analyzers` proveravaju stvarna pravila jezika i oba prolaze.
+      - name: Provera stila
+        run: dotnet format UsluzionicaServer.sln style --verify-no-changes --verbosity diagnostic
+
+      - name: Provera analizatora
+        run: dotnet format UsluzionicaServer.sln analyzers --verify-no-changes --verbosity diagnostic
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 2. UNIT TESTOVI — bez Dockera, gotovi za sekunde. Namerno odvojeni da bi
+  #    greška u čistoj logici pala brzo, bez čekanja na SQL Server kontejner.
   # ──────────────────────────────────────────────────────────────────────────
   unit-tests:
     name: Unit testovi
     runs-on: ubuntu-latest
+    needs: quality
     steps:
       - uses: actions/checkout@v4
 
@@ -50,6 +116,7 @@ jobs:
           --no-build --configuration Release
           --logger "trx;LogFileName=unit.trx"
           --results-directory TestResults
+          --settings coverlet.runsettings
           --collect:"XPlat Code Coverage"
 
       - name: Objavi rezultate
@@ -60,9 +127,8 @@ jobs:
           path: TestResults/
 
   # ──────────────────────────────────────────────────────────────────────────
-  # Integracioni testovi — Testcontainers podiže pravi SQL Server.
-  # ubuntu-latest runner ima Docker unapred instaliran, pa nije potrebna
-  # nikakva dodatna priprema.
+  # 3. INTEGRACIONI TESTOVI — Testcontainers podiže pravi SQL Server.
+  #    ubuntu-latest runner ima Docker unapred instaliran.
   # ──────────────────────────────────────────────────────────────────────────
   integration-tests:
     name: Integracioni testovi
@@ -101,6 +167,7 @@ jobs:
           --no-build --configuration Release
           --logger "trx;LogFileName=integration.trx"
           --results-directory TestResults
+          --settings coverlet.runsettings
           --collect:"XPlat Code Coverage"
 
       - name: Objavi rezultate
@@ -111,7 +178,114 @@ jobs:
           path: TestResults/
 
   # ──────────────────────────────────────────────────────────────────────────
-  # Sažetak u PR-u — bez ovoga rezultate treba tražiti po artefaktima.
+  # 4. POKRIVENOST — spaja izveštaje oba test job-a i OBARA build ispod praga.
+  #
+  #    Do sada je pokrivenost bila skupljana i bacana: `--collect` je pravio
+  #    Cobertura XML, artefakt se okačio, i niko ga nikad nije pročitao.
+  #    Ovaj job je razlika između "merimo pokrivenost" i "pokrivenost nešto znači".
+  # ──────────────────────────────────────────────────────────────────────────
+  coverage:
+    name: Pokrivenost koda
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    permissions:
+      contents: read
+      pull-requests: write     # da može da ostavi komentar sa izveštajem
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preuzmi rezultate oba test job-a
+        uses: actions/download-artifact@v4
+        with:
+          path: results
+
+      - name: Postavi .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # ReportGenerator spaja VIŠE Cobertura fajlova u jedan.
+      # Bitno je da se spoje: unit testovi pokrivaju SearchNormalizer, a
+      # integracioni pokrivaju servise. Gledani odvojeno, oba izgledaju loše.
+      - name: Instaliraj ReportGenerator
+        run: dotnet tool install --global dotnet-reportgenerator-globaltool
+
+      - name: Spoji izveštaje
+        run: >
+          reportgenerator
+          -reports:"results/**/coverage.cobertura.xml"
+          -targetdir:"coverage-report"
+          -reporttypes:"Html;Cobertura;MarkdownSummaryGithub"
+
+      - name: Sažetak u GitHub UI
+        run: cat coverage-report/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+
+      # ── KAPIJA ──────────────────────────────────────────────────────────
+      # Čita `line-rate` iz spojenog Cobertura XML-a i poredi ga sa pragom.
+      # Bez ovog koraka ceo posao iznad je samo lep izveštaj.
+      - name: Provera praga pokrivenosti
+        run: |
+          set -euo pipefail
+
+          # line-rate je atribut korenog <coverage> elementa, vrednost 0..1
+          RATE=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          root = ET.parse('coverage-report/Cobertura.xml').getroot()
+          print(f\"{float(root.get('line-rate')) * 100:.2f}\")
+          ")
+
+          echo "Pokrivenost linija: ${RATE}%  (prag: ${MIN_COVERAGE}%)"
+          echo "### Pokrivenost: ${RATE}% (prag ${MIN_COVERAGE}%)" >> $GITHUB_STEP_SUMMARY
+
+          # bc nije uvek prisutan na runneru; poređenje radimo u pythonu.
+          python3 -c "
+          import sys
+          rate, minimum = float('${RATE}'), float('${MIN_COVERAGE}')
+          if rate < minimum:
+              print(f'::error::Pokrivenost {rate}% je ispod praga {minimum}%.')
+              sys.exit(1)
+          print(f'Pokrivenost {rate}% je iznad praga {minimum}%.')
+          "
+
+      - name: Objavi HTML izveštaj
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage-report/
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 5. DOCKER BUILD — dokaz da se slika i dalje gradi.
+  #
+  #    Zašto je ovo zasebna kapija: `dotnet build` prolazi i kad je Dockerfile
+  #    pokvaren. Sve što se lomi samo u kontejneru — nedostajući `curl`, pogrešan
+  #    `COPY`, izgubljen wwwroot — otkriva se tek pri deployu, u najgorem trenutku.
+  #
+  #    Slika se NE objavljuje; to radi CD workflow. Ovde se samo gradi.
+  # ──────────────────────────────────────────────────────────────────────────
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: quality
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Postavi Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Izgradi sliku (bez objavljivanja)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: usluzionica-api:ci
+          # GitHub Actions keš slojeva — bez ovoga se svaki build vrti od nule
+          # i traje 3-4 minuta umesto ~40 s.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 6. SAŽETAK U PR-u — bez ovoga rezultate treba tražiti po artefaktima.
   # ──────────────────────────────────────────────────────────────────────────
   report:
     name: Izveštaj
@@ -147,6 +321,33 @@ jobs:
           name: Rezultati testova
           path: 'results/**/*.trx'
           reporter: dotnet-trx
-          # Ne obaraj ceo CI ako sam izveštaj zakaže — rezultati testova su
-          # merodavni, a oni se vide u prethodna dva job-a i u artefaktima.
           fail-on-error: false
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # 7. JEDNA TAČKA ZA BRANCH PROTECTION
+  #
+  #    GitHub traži da se u branch protection navedu IMENA checkova. Da se
+  #    navode pojedinačno, svaki novi job bi tražio i izmenu podešavanja repoa —
+  #    i lako bi se zaboravilo, pa bi kapija tiho prestala da važi.
+  #
+  #    Umesto toga, u branch protection ide SAMO "CI prošao", a ovaj job pada
+  #    ako je bilo koji od njegovih `needs` pao.
+  # ──────────────────────────────────────────────────────────────────────────
+  ci-ok:
+    name: CI prošao
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [quality, unit-tests, integration-tests, coverage, docker-build]
+    steps:
+      - name: Provera da su svi job-ovi uspeli
+        run: |
+          echo "Rezultati: ${{ join(needs.*.result, ', ') }}"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "::error::Bar jedan CI job je pao."
+            exit 1
+          fi
+          if [[ "${{ contains(needs.*.result, 'cancelled') }}" == "true" ]]; then
+            echo "::error::Bar jedan CI job je otkazan."
+            exit 1
+          fi
+          echo "Svi CI job-ovi su prošli."

@@ -25,12 +25,23 @@ public sealed class ReferralEntryDto
 {
     public string    InviteeName  { get; set; } = string.Empty;
 
-    /// <summary>Pending | Rewarded</summary>
+    /// <summary>Pending (nije potvrdio email) | Registered (jeste) | Rewarded (postao provajder)</summary>
     public string    Status       { get; set; } = string.Empty;
 
     public DateTime  InvitedAt    { get; set; }
+
+    /// <summary>Kada je isplaćena 1. rata — null dok pozvani ne potvrdi email.</summary>
+    public DateTime? SignupRewardedAt { get; set; }
+
+    /// <summary>Kada je isplaćena 2. rata — null dok pozvani ne aktivira provajder nalog.</summary>
     public DateTime? RewardedAt   { get; set; }
 
-    /// <summary>Null dok korisnik nije aktivirao provider nalog.</summary>
-    public decimal?  TokensEarned { get; set; }
+    /// <summary>1. rata (potvrda emaila). Null dok nije isplaćena.</summary>
+    public decimal?  SignupTokens     { get; set; }
+
+    /// <summary>2. rata (aktivacija provajdera). Null dok nije isplaćena.</summary>
+    public decimal?  ActivationTokens { get; set; }
+
+    /// <summary>Zbir obe rate — 0 dok ništa nije isplaćeno.</summary>
+    public decimal   TokensEarned { get; set; }
 }

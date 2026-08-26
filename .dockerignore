@@ -1,0 +1,45 @@
+﻿# Docker CLI pakuje ceo folder i šalje ga daemon-u PRE nego što build počne.
+# Bez ovoga se šalje ~325 MB, sa njim ~2 MB.
+
+# ── Build izlaz ──────────────────────────────────────────────────────────────
+**/bin/
+**/obj/
+**/out/
+# binverify NIJE standardno ime i ne hvata ga nijedan bin/obj glob.
+# To su ostaci od build-ova sa -p:BaseOutputPath — 126 MB.
+**/binverify/
+
+# ── Test projekti ────────────────────────────────────────────────────────────
+# Ne ulaze u runtime sliku. Publish ide iz .csproj koji ih ionako isključuje.
+tests/
+
+# ── Git i IDE ────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+.github/
+.vs/
+.vscode/
+*.user
+*.suo
+
+# ── TAJNE — nikad u sliku ────────────────────────────────────────────────────
+# appsettings.Local.json sadrži prave kredencijale. Gitignore-ovan je, ali
+# Docker to ne zna. Bez ove linije završava zapečen u sloju slike — i ostaje
+# tamo čak i ako ga obrišeš u sledećem sloju.
+appsettings.Local.json
+appsettings.*.Local.json
+.env
+
+# ── Docker fajlovi ───────────────────────────────────────────────────────────
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+
+# ── Korisnički sadržaj ───────────────────────────────────────────────────────
+# Živi na volumenu, ne u slici. Folder se pravi u Dockerfile-u.
+wwwroot/uploads/
+
+# ── Dokumentacija ────────────────────────────────────────────────────────────
+**/*.md
+UsluzionicaServer.http

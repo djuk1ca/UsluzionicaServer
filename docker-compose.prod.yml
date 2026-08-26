@@ -1,0 +1,53 @@
+# Produkcijski override — sloj PREKO docker-compose.yml, ne zamena za njega.
+#
+# Compose spaja fajlove navedene sa -f, sleva nadesno:
+#     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Sve iz osnovnog fajla ostaje; ovde se menja samo ono što se u produkciji
+# razlikuje. Zato ovde nema ni `db` konekcije ni volumena — oni su isti.
+#
+# NAJVAŽNIJA RAZLIKA: `build` postaje `image`.
+# Lokalno se slika gradi iz izvornog koda. Na serveru se POVLAČI iz registry-ja
+# — server nema izvorni kod i ne treba da ga ima. Isti bajtovi koje je CI
+# izgradio i testirao idu u produkciju, bez ponovnog građenja.
+
+services:
+  api:
+    # ${IMAGE_TAG} upisuje CD workflow u .env pri svakom deployu.
+    # Podrazumevano `latest` je samo da ručni `up` ne pukne ako .env fali —
+    # deploy uvek postavlja konkretan sha- tag.
+    image: ghcr.io/djuk1ca/usluzionicaserver:${IMAGE_TAG:-latest}
+
+    # Poništava `build:` iz osnovnog fajla. Bez ovoga bi compose i dalje
+    # pokušavao da gradi iz konteksta koji na serveru ne postoji.
+    build: !reset null
+
+    environment:
+      # Production uključuje stroža pravila u SecretsGuard-u i
+      # RequireConfirmedEmail u Identity konfiguraciji.
+      ASPNETCORE_ENVIRONMENT: Production
+
+      # Pun URL sa HTTPS — od ovoga zavise svi URL-ovi slika u odgovorima.
+      # Mora odgovarati domenu na kom reverse proxy sluša.
+      App__BaseUrl: https://${API_DOMAIN}
+      Cors__AllowedOrigins__0: https://${APP_DOMAIN}
+
+    ports:
+      # SAMO NA LOKALNOM INTERFEJSU.
+      #
+      # U osnovnom fajlu stoji "8080:8080", što na serveru sa javnom IP adresom
+      # znači da je API dostupan svima na portu 8080 — zaobilazeći reverse proxy,
+      # dakle bez TLS-a i bez rate limita koje proxy radi.
+      #
+      # "127.0.0.1:8080:8080" ga vezuje za loopback: dohvatljiv je samo proxy-ju
+      # koji radi na istoj mašini.
+      - "127.0.0.1:8080:8080"
+
+  db:
+    ports: !reset []
+    # Baza NE SME biti izložena internetu. U osnovnom fajlu je mapirana na
+    # 14330 radi lokalnog SSMS-a; na serveru se briše u potpunosti.
+    # API joj i dalje pristupa preko Docker mreže po imenu `db`.
+
+  cache:
+    ports: !reset []

@@ -1,4 +1,5 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
+using UsluzionicaServer.Infrastructure.Redis;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Infrastructure;
@@ -16,6 +17,7 @@ namespace UsluzionicaServer.Infrastructure;
 public sealed class MessageCleanupService(
     IServiceScopeFactory scopeFactory,
     IConfiguration       config,
+    DistributedLock      locks,
     ILogger<MessageCleanupService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -58,6 +60,13 @@ public sealed class MessageCleanupService(
 
         try
         {
+            // Tačno jedna instanca sme da izvrši ovaj posao.
+            // Bez ovoga bi se sa dve instance API-ja isti posao brisanja izvršio dvaput.
+            // TTL od 5 minuta je duži od trajanja posla, a kraći od intervala
+            // ponavljanja — ako instanca pukne, lock se sam oslobodi.
+            await using var lease = await locks.TryAcquireAsync("message-cleanup", TimeSpan.FromMinutes(5));
+            if (lease is null) return;
+
             // Kreiramo novi scope za svaki poziv (jer je DbContext scoped)
             await using var scope = scopeFactory.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

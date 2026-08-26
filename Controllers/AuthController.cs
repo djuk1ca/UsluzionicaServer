@@ -11,6 +11,7 @@ namespace UsluzionicaServer.Controllers;
 [Route("api/auth")]
 public sealed class AuthController(
     AuthService                  authService,
+    ReferralService              referralService,
     UserManager<ApplicationUser> userManager) : ControllerBase
 {
     // ── POST /api/auth/register ────────────────────────────────────────────
@@ -92,6 +93,11 @@ public sealed class AuthController(
                 title:   "Link je istekao",
                 message: "Verifikacioni link je nevažeći ili je istekao (važi 24 sata). " +
                          "Prijavi se u aplikaciju i zatraži novi verifikacioni email.");
+
+        // Prva referral rata — tek sada, kad je adresa dokazano stvarna.
+        // Metoda je idempotentna: ovaj link se lako aktivira dvaput (mail
+        // klijent ga prefetch-uje, pa korisnik klikne), a nagrada sme jednom.
+        await referralService.TryRewardSignupAsync(user.Id);
 
         return HtmlPage(
             success: true,

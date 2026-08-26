@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Podešavanja merenja pokrivenosti.
+
+  ZAŠTO POSTOJI: prvo merenje je dalo 81.98% pokrivenosti linija, što je zvučalo
+  odlično dok se nije pogledala raspodela — generisan regex kod je bio na 91%,
+  a SVI kontroleri na 0%. Broj je bio tačan i beskoristan istovremeno.
+
+  Ovaj fajl isključuje kod koji nismo napisali, da bi procenat govorio o kodu
+  za koji smo odgovorni.
+-->
+<RunSettings>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="XPlat code coverage">
+        <Configuration>
+          <Format>cobertura</Format>
+
+          <!-- EF Core sam piše migracije i ModelSnapshot. Nikad ih ne testiramo
+               direktno (testiramo REZULTAT — da šema radi), pa bi njihovih
+               nekoliko hiljada linija samo pomeralo procenat gore-dole pri
+               svakoj novoj migraciji. -->
+          <Exclude>[*]UsluzionicaServer.Migrations.*</Exclude>
+
+          <!-- Isključuje sve što je označeno kao generisano:
+                 • GeneratedCodeAttribute      — source generatori (npr. [GeneratedRegex])
+                 • CompilerGeneratedAttribute  — lambda zatvarači, async state mašine,
+                                                 record Equals/GetHashCode
+                 • ExcludeFromCodeCoverage     — ono što smo sami označili
+
+               Bez prvog je `System.Text.RegularExpressions.Generated` ulazio u
+               račun sa 91% i sam dizao ukupan procenat. -->
+          <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
+
+          <!-- Program.cs je startup: WebApplicationFactory ga izvršava pri svakom
+               integracionom testu, pa se meri kao ~80% pokriven. To NIJE zasluga
+               testova — to je posledica dizanja hosta. Da ostane, procenat bi
+               rastao svaki put kad se doda konfiguracija, bez ijednog novog testa. -->
+          <ExcludeByFile>**/Program.cs</ExcludeByFile>
+
+          <!-- Kod koji baca izuzetak nema šta da pokrije. -->
+          <SkipAutoProps>true</SkipAutoProps>
+          <IncludeTestAssembly>false</IncludeTestAssembly>
+          <UseSourceLink>true</UseSourceLink>
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

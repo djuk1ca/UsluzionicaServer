@@ -406,3 +406,5 @@ FodyWeavers.xsd
 appsettings.Local.json
 appsettings.*.Local.json
 !appsettings.Local.json.example
+.env
+!.env.example

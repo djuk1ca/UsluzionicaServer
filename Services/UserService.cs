@@ -169,6 +169,7 @@ public sealed class UserService(
         }
     }
 
+
     // ── Mapper ─────────────────────────────────────────────────────────────
     private static UserProfileDto MapToDto(ApplicationUser user) => new()
     {

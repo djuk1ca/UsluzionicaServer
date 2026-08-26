@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations.Schema;
 using UsluzionicaServer.Domain.Enums;
 
 namespace UsluzionicaServer.Domain.Entities;
@@ -18,7 +19,20 @@ public class Referral
     public string         ReferralCode   { get; set; } = string.Empty;
 
     public ReferralStatus Status         { get; set; } = ReferralStatus.Pending;
-    public decimal?       TokensAwarded  { get; set; }  // null dok nije Rewarded
     public DateTime       CreatedAt      { get; set; } = DateTime.UtcNow;
-    public DateTime?      RewardedAt     { get; set; }
+
+    // ── Prva rata: pozvani je potvrdio email ───────────────────────────────
+    // null dok nije isplaćeno. Namerno nullable, a ne 0: razlikuje
+    // "nije isplaćeno" od "isplaćeno nula".
+    public decimal?       SignupTokensAwarded { get; set; }
+    public DateTime?      SignupRewardedAt    { get; set; }
+
+    // ── Druga rata: pozvani je aktivirao provajder nalog ───────────────────
+    public decimal?       ActivationTokensAwarded { get; set; }
+    public DateTime?      ActivationRewardedAt    { get; set; }
+
+    /// <summary>Ukupno isplaćeno po ovom referralu. Nije kolona — računa se.</summary>
+    [NotMapped]
+    public decimal TotalTokensAwarded =>
+        (SignupTokensAwarded ?? 0m) + (ActivationTokensAwarded ?? 0m);
 }

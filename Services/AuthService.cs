@@ -12,6 +12,7 @@ public sealed class AuthService(
     IEmailService                emailService,
     TokenService                 tokenService,
     GeoService                   geoService,
+    ReferralService              referralService,
     IConfiguration               config,
     ILogger<AuthService>         logger)
 {
@@ -381,14 +382,22 @@ public sealed class AuthService(
             .ExecuteUpdateAsync(s => s.SetProperty(t => t.IsRevoked, true));
 
         // Reset lozinke potvrđuje da korisnik ima pristup email adresi.
+        var emailUpravoPotvrdjen = false;
         if (!user.EmailConfirmed)
         {
-            user.EmailConfirmed = true;
+            user.EmailConfirmed  = true;
+            emailUpravoPotvrdjen = true;
             await userManager.UpdateAsync(user);
         }
 
         await userManager.ResetAccessFailedCountAsync(user);
         await db.SaveChangesAsync();
+
+        // Reset lozinke je drugi put kroz koji email može postati potvrđen, pa
+        // i on mora okinuti prvu referral ratu — inače bi korisnik koji nikad
+        // nije kliknuo verifikacioni link ostavio svog pozivaoca bez nagrade.
+        if (emailUpravoPotvrdjen)
+            await referralService.TryRewardSignupAsync(user.Id);
 
         logger.LogInformation("Lozinka resetovana za: {Email}", email);
         return (true, null);

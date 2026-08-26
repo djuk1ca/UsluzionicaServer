@@ -69,7 +69,12 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 // pravilo isključeno). Testovi ne smeju zavisiti od te zbrke.
                 ["Booking:ExecuteAfterDays"]              = "3",
                 ["Booking:ServiceRewardTokens"]           = "0.50",
-                ["Referral:ProviderActivationRewardTokens"] = "5.0",
+
+                // Referral se isplaćuje u dve rate. Vrednosti su namerno
+                // RAZLIČITE (2 i 3), a ne obe iste: da su jednake, test koji
+                // greškom isplati pogrešnu ratu i dalje bi prošao.
+                ["Referral:SignupRewardTokens"]             = "2.0",
+                ["Referral:ProviderActivationRewardTokens"] = "3.0",
             });
         });
 

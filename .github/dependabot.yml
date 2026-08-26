@@ -1,0 +1,87 @@
+# Dependabot — automatski PR-ovi za zastarele i ranjive zavisnosti.
+#
+# ŠTA RADI
+# Skenira zavisnosti, poredi ih sa GitHub Advisory bazom i otvara PR sa
+# nadogradnjom. Svaki PR prolazi kroz CI kao i svaki drugi — dakle testovi,
+# pokrivenost i Docker build moraju da prođu pre nego što se merguje.
+#
+# ZAŠTO JE OVO VAŽNIJE NEGO ŠTO ZVUČI
+# Ranjivost u NuGet paketu je tvoja ranjivost. Bez ovoga se saznaje tek kad
+# neko ručno pokrene `dotnet list package --vulnerable` — a to niko ne radi.
+#
+# NAPOMENA: Dependabot alerts (bezbednosna upozorenja) uključuju se odvojeno u
+# Repo → Settings → Code security → Dependabot alerts. Ovaj fajl kontroliše
+# samo PR-ove za nadogradnju verzija.
+
+version: 2
+
+updates:
+  # ── NuGet paketi ──────────────────────────────────────────────────────────
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Belgrade
+
+    # Bez ovoga zna da otvori 15 PR-ova odjednom i pretvori se u šum
+    # koji se ignoriše — a onda se ignoriše i onaj koji je stvarno važan.
+    open-pull-requests-limit: 5
+
+    labels: ["dependencies", "nuget"]
+    commit-message:
+      prefix: "deps"
+
+    groups:
+      # Grupisanje je ključno kod .NET-a: Microsoft.* paketi se izdaju zajedno i
+      # moraju biti na istoj verziji. Pojedinačni PR-ovi bi razbili taj sklad i
+      # svaki bi pao na restore-u.
+      microsoft:
+        patterns:
+          - "Microsoft.*"
+          - "System.*"
+      testing:
+        patterns:
+          - "xunit*"
+          - "FluentAssertions"
+          - "NSubstitute"
+          - "Testcontainers*"
+          - "Respawn"
+          - "coverlet*"
+      redis:
+        patterns:
+          - "StackExchange.Redis"
+          - "*.StackExchangeRedis"
+
+    ignore:
+      # .NET 9 nadogradnja je svesna odluka, ne automatski PR — traži izmenu
+      # TargetFramework-a, Docker slika i CI-ja. Patch i minor unutar 8.x prolaze.
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+
+  # ── GitHub Actions ────────────────────────────────────────────────────────
+  # Same akcije su kod koji se izvršava sa pristupom tvojim tajnama.
+  # Zastarela akcija je isti rizik kao zastareo NuGet paket, samo manje vidljiv.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ["dependencies", "github-actions"]
+    commit-message:
+      prefix: "ci"
+
+  # ── Docker bazne slike ────────────────────────────────────────────────────
+  # Prati `mcr.microsoft.com/dotnet/aspnet:8.0` i `sdk:8.0` iz Dockerfile-a.
+  # Bezbednosne zakrpe Debian-a stižu upravo kroz nove verzije baznih slika.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ["dependencies", "docker"]
+    commit-message:
+      prefix: "docker"

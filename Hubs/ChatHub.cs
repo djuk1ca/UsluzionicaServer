@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -32,7 +32,7 @@ public sealed class ChatHub(
         var userId = UserId();
 
         // Registruj konekciju u OnlineTracker
-        tracker.Register(userId, Context.ConnectionId);
+        await tracker.RegisterAsync(userId, Context.ConnectionId);
 
         // Korisnik ulazi u svoju ličnu grupu (za direktne poruke servera)
         await Groups.AddToGroupAsync(Context.ConnectionId, UserGroup(userId));
@@ -55,7 +55,7 @@ public sealed class ChatHub(
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         var userId    = UserId();
-        var fullyGone = tracker.Unregister(userId, Context.ConnectionId);
+        var fullyGone = await tracker.UnregisterAsync(userId, Context.ConnectionId);
 
         // Samo ako je korisnik POTPUNO offline (nema više ni jedne konekcije)
         // obaveštavamo kontakte.

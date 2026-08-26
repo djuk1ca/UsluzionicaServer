@@ -1,0 +1,193 @@
+name: CD — Hetzner
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KAKO SE RAZLIKUJE OD AZURE CD-a
+#
+# Azure App Service je upravljana usluga: kažeš mu ime slike i on sve ostalo
+# uradi sam. Hetzner Cloud je gola Linux mašina — ti si i platforma.
+#
+# Zato ovde nema `azure/webapps-deploy`. Umesto toga:
+#   1. slika se objavi na GHCR (isto kao za Azure)
+#   2. preko SSH-a se na serveru pokrene `docker compose pull && up -d`
+#
+# Server ima ISTI `docker-compose.yml` koji koristiš lokalno — to je i bila
+# poenta Faze 2. Razlika je samo u tome što `api` servis ne gradi sliku iz
+# izvornog koda nego je povlači iz registry-ja (vidi compose override ispod).
+#
+# PREDNOST: ovo je jeftinije i prenosivo. Isti workflow radi na bilo kom VPS-u.
+# MANA: ti održavaš mašinu — zakrpe, firewall, sertifikate, backup.
+# ═══════════════════════════════════════════════════════════════════════════
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-hetzner
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    name: Build i push slike
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Prijava na GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Odredi tagove
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=sha-,format=short
+
+      - name: Postavi Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build i push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # DEPLOY PREKO SSH-a
+  #
+  # Migracije se ovde NE rade zasebnim korakom kao na Azure-u. Razlog: Hetzner
+  # baza nije izložena internetu (i ne treba da bude), pa runner ne može do nje.
+  # Migracije izvršava sama aplikacija pri startu — `MigrateAsync()` u Program.cs.
+  #
+  # To je prihvatljivo dok se vrti JEDNA instanca. Kad se pređe na više, ovo
+  # mora da se izdvoji u zaseban `docker compose run --rm api dotnet ef ...`
+  # korak koji se izvrši pre nego što nove instance krenu.
+  # ──────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy na Hetzner
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment:
+      name: production-hetzner
+      url: https://${{ vars.HETZNER_API_DOMAIN }}
+
+    steps:
+      - name: Deploy preko SSH-a
+        uses: appleboy/ssh-action@v1
+        with:
+          host:     ${{ secrets.HETZNER_HOST }}
+          username: ${{ secrets.HETZNER_USER }}
+          key:      ${{ secrets.HETZNER_SSH_KEY }}
+          port:     ${{ secrets.HETZNER_SSH_PORT || 22 }}
+          # Bez ovoga se komande izvršavaju u login shell-u bez `set -e`, pa bi
+          # neuspeo `pull` prošao neprimećeno a `up -d` digao staru sliku.
+          script_stop: true
+          script: |
+            set -euo pipefail
+            cd /opt/usluzionica
+
+            # Prijava na GHCR. GITHUB_TOKEN ne važi van runnera, pa je ovde
+            # potreban Personal Access Token sa `read:packages` opsegom.
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
+              -u ${{ github.actor }} --password-stdin
+
+            # Tag koji se deployuje upisujemo u .env; compose ga čita kao
+            # ${IMAGE_TAG}. Tako server uvek zna TAČNO koja verzija se vrti,
+            # i rollback je izmena jedne linije + `up -d`.
+            TAG="${{ needs.build-and-push.outputs.image-tag }}"
+            sed -i "/^IMAGE_TAG=/d" .env
+            echo "IMAGE_TAG=${TAG}" >> .env
+            echo "Deployujem tag: ${TAG}"
+
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml pull api
+            docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api
+
+            # Slike se gomilaju posle svakog deploya i pojedu disk.
+            # `-f` bez `-a` briše samo one koje nijedan kontejner ne koristi.
+            docker image prune -f
+
+      # ── SMOKE TEST ───────────────────────────────────────────────────────
+      # Ide sa runnera preko interneta, dakle proverava i da su DNS, reverse
+      # proxy i TLS ispravni — ne samo da kontejner radi.
+      - name: Smoke test /health
+        run: |
+          set -euo pipefail
+          URL="https://${{ vars.HETZNER_API_DOMAIN }}/health"
+          echo "Čekam da $URL odgovori..."
+
+          for i in $(seq 1 24); do
+            CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
+
+            if [[ "$CODE" == "200" ]]; then
+              echo "Zdrav posle $((i*5)) s: $(cat /tmp/health.txt)"
+              echo "### Deploy uspešan — /health vraća 200" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+
+            echo "  pokušaj $i/24: HTTP $CODE"
+            sleep 5
+          done
+
+          echo "::error::/health nije odgovorio 200 ni posle 2 minuta."
+          exit 1
+
+      - name: Uputstvo za rollback ako je palo
+        if: failure()
+        run: |
+          echo "### Deploy pao — rollback" >> $GITHUB_STEP_SUMMARY
+          echo 'Na serveru:' >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'cd /opt/usluzionica' >> $GITHUB_STEP_SUMMARY
+          echo 'sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=sha-PRETHODNI/" .env' >> $GITHUB_STEP_SUMMARY
+          echo 'docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ŠTA TREBA PODESITI (kad uzmeš server)
+#
+# Secrets:
+#   HETZNER_HOST      IP ili hostname servera
+#   HETZNER_USER      korisnik za deploy — NE root, vidi napomenu
+#   HETZNER_SSH_KEY   PRIVATNI ključ (ceo, sa BEGIN/END redovima)
+#   HETZNER_SSH_PORT  opciono, ako SSH nije na 22
+#   GHCR_TOKEN        GitHub PAT sa `read:packages`
+#
+# Variables:
+#   HETZNER_API_DOMAIN   npr. api.usluzionica.rs
+#
+# Na serveru:
+#   1. Napravi korisnika `deploy` u grupi `docker` — ne deployuj kao root.
+#      Ako ključ procuri, napadač dobija docker, ne ceo sistem.
+#   2. /opt/usluzionica/ sadrži docker-compose.yml, docker-compose.prod.yml i .env
+#   3. Reverse proxy (Caddy ili nginx) za TLS — kontejner sluša HTTP na 8080,
+#      proxy radi HTTPS na 443. Caddy sam vadi Let's Encrypt sertifikat.
+# ═══════════════════════════════════════════════════════════════════════════

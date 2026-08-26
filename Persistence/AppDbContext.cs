@@ -29,6 +29,44 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<FavoriteListing>     FavoriteListings     => Set<FavoriteListing>();
     public DbSet<FavoriteProvider>    FavoriteProviders    => Set<FavoriteProvider>();
 
+    // ── Održavanje indeksa za pretragu ─────────────────────────────────────
+    // Presreće SVAKI upis i osvežava Search* kolone pre nego što odu u bazu.
+    //
+    // Zašto ovde a ne u servisima: ovako nijedan put pisanja ne može da
+    // zaboravi indeks. Da je u ListingService.CreateAsync/UpdateAsync, svaka
+    // buduća izmena (admin panel, seed, popravka podataka) bila bi jedna
+    // zaboravljena linija od toga da oglas postoji u bazi ali se ne može naći.
+    //
+    // ⚠️ ExecuteUpdateAsync ZAOBILAZI change tracker i time i ovaj kod.
+    //    Postojeći pozivi su bezbedni jer ne diraju tekstualna polja
+    //    (ViewCount, IsActive, IsRead, Status...). PRAVILO: nikad
+    //    ExecuteUpdate nad Title/Description/Location/FullName bez da u istom
+    //    pozivu postaviš i odgovarajuću Search* kolonu.
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RefreshSearchIndex();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        RefreshSearchIndex();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void RefreshSearchIndex()
+    {
+        foreach (var entry in ChangeTracker.Entries<Listing>())
+            if (entry.State is EntityState.Added or EntityState.Modified)
+                Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
+
+        foreach (var entry in ChangeTracker.Entries<ApplicationUser>())
+            if (entry.State is EntityState.Added or EntityState.Modified)
+                Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
+    }
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -43,6 +81,12 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(u => u.ReferralCode).HasMaxLength(20);
             e.HasIndex(u => u.ReferralCode).IsUnique();
             e.Property(u => u.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
+
+            // Denormalizovani indeks — vidi komentar u Listing konfiguraciji
+            // o tome zašto varchar + IsUnicode(false).
+            e.Property(u => u.SearchName).HasMaxLength(400).IsUnicode(false).IsRequired();
+            e.Property(u => u.SearchVersion).IsRequired();
+            e.HasIndex(u => u.SearchName).HasDatabaseName("IX_AspNetUsers_SearchName");
 
             e.HasMany(u => u.ConversationsAsUser1)
              .WithOne(c => c.User1)
@@ -79,8 +123,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<Referral>(e =>
         {
             e.Property(r => r.ReferralCode).HasMaxLength(20).IsRequired();
+            // Status se čuva kao STRING, ne kao int. Zato je ubacivanje nove
+            // vrednosti (Registered) između Pending i Rewarded bezbedno: da je
+            // int, svaki postojeći red sa vrednošću 1 (Rewarded) bi se posle
+            // izmene enuma čitao kao Registered — tiho i bez ijedne greške.
             e.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
-            e.Property(r => r.TokensAwarded).HasColumnType("decimal(18,2)");
+
+            e.Property(r => r.SignupTokensAwarded).HasColumnType("decimal(18,2)");
+            e.Property(r => r.ActivationTokensAwarded).HasColumnType("decimal(18,2)");
             e.HasIndex(r => r.ReferredUserId).IsUnique();  // jedan user = jedna referral veza
 
             // Referrer → mnogo Referrals (konfigurisano gore na ApplicationUser)
@@ -388,7 +438,34 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(l => l.PriceFrom).HasColumnType("decimal(10,2)");
             e.Property(l => l.PriceTo).HasColumnType("decimal(10,2)");
             e.Property(l => l.BoostScore).HasColumnType("decimal(8,2)");
-            e.HasIndex(l => new { l.Status, l.IsBoosted });
+
+            // ── Denormalizovani indeks za pretragu ─────────────────────────
+            // varchar, NE nvarchar: izlaz iz Fold() je čist ASCII, pa je
+            // nvarchar dupli prostor bez ikakve koristi.
+            //
+            // .IsUnicode(false) je OBAVEZAN. Bez njega EF šalje parametre kao
+            // nvarchar, SQL Server tada konvertuje STRANU KOLONE (ne parametra)
+            // da bi tipovi odgovarali, i time obara mogućnost korišćenja
+            // indeksa — svaki seek postaje pun scan. To je najlakši način da se
+            // performanse ovog dizajna slučajno unište.
+            e.Property(l => l.SearchTitle).HasMaxLength(700).IsUnicode(false).IsRequired();
+            e.Property(l => l.SearchLocation).HasMaxLength(420).IsUnicode(false).IsRequired();
+            e.Property(l => l.SearchBody).HasColumnType("varchar(max)").IsRequired();
+            e.Property(l => l.SearchVersion).IsRequired();
+
+            // Zamenjuje raniji HasIndex(Status, IsBoosted): isti prefiks, ali
+            // sada pokriva i sortiranje (BoostScore, CreatedAt) i uključuje
+            // kolone koje pretraga čita — time nema skoka na tabelu (key lookup)
+            // u najčešćem sloju pretrage.
+            e.HasIndex(l => new { l.Status, l.IsBoosted, l.BoostScore, l.CreatedAt })
+             .IsDescending(false, true, true, true)
+             .IncludeProperties(l => new { l.SearchTitle, l.SearchLocation, l.CategoryId })
+             .HasDatabaseName("IX_Listings_Search_Active");
+
+            // Filter grada postaje indeksirani seek nad foldovanom vrednošću.
+            e.HasIndex(l => new { l.SearchLocation, l.Status })
+             .HasDatabaseName("IX_Listings_SearchLocation");
+
             e.HasOne(l => l.ProviderProfile)
              .WithMany(p => p.Listings)
              .HasForeignKey(l => l.ProviderProfileId)

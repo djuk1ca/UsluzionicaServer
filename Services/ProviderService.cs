@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
@@ -6,6 +6,7 @@ using UsluzionicaServer.DTOs.Listings;
 using UsluzionicaServer.DTOs.Provider;
 using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Infrastructure.Media;
+using UsluzionicaServer.Infrastructure.Redis;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
@@ -15,9 +16,18 @@ public sealed class ProviderService(
     UserManager<ApplicationUser> userManager,
     IWebHostEnvironment          env,
     IConfiguration               config,
-    NotificationService          notificationService,
+    ReferralService              referralService,
+    CacheService                 cache,
     ILogger<ProviderService>     logger)
 {
+    /// <summary>
+    /// Kratak TTL — profil je javan i čita ga svako ko otvori oglas, ali se
+    /// menja češće od kategorija (nova recenzija menja AverageRating, nov oglas
+    /// menja TotalListings). 5 minuta je kompromis: skida najveći deo čitanja,
+    /// a zastarelost je kratka i bezopasna.
+    /// </summary>
+    private static readonly TimeSpan ProfileTtl = TimeSpan.FromMinutes(5);
+
     // ── AKTIVACIJA ─────────────────────────────────────────────────────────
     /// <summary>
     /// Aktivira provajderski status korisnika:
@@ -85,8 +95,9 @@ public sealed class ProviderService(
         user.IsProvider = true;
         await userManager.UpdateAsync(user);
 
-        // ── Referral nagrada ───────────────────────────────────────────────
-        await TryRewardReferrerAsync(userId);
+        // ── Referral nagrada — druga rata ──────────────────────────────────
+        // Prva rata je isplaćena kad je ovaj korisnik potvrdio email.
+        await referralService.TryRewardActivationAsync(userId);
 
         await db.SaveChangesAsync();
 
@@ -110,7 +121,32 @@ public sealed class ProviderService(
 
     // ── GET JAVNI PROFIL ───────────────────────────────────────────────────
     public async Task<ProviderProfileDto?> GetPublicProfileAsync(int providerProfileId)
-        => await GetProfileDtoAsync(providerProfileId, includeListings: true);
+    {
+        // KEŠIRANO: javni profil povlači profil + korisnika + kategorije +
+        // sve oglase sa slikama - najskuplji čitalački upit u aplikaciji.
+        //
+        // GetOrSetAsync ne kešira null, pa nepostojeći profil svaki put ide u
+        // bazu. To je ovde ispravno: ID-jevi profila su sekvencijalni i mali,
+        // pa bi keširanje promašaja bilo lako zloupotrebiti da se keš napuni
+        // beskorisnim zapisima.
+        var cached = await cache.GetAsync<ProviderProfileDto>(
+            CacheService.Keys.ProviderProfile(providerProfileId));
+        if (cached is not null) return cached;
+
+        var fresh = await GetProfileDtoAsync(providerProfileId, includeListings: true);
+        if (fresh is not null)
+            await cache.SetAsync(
+                CacheService.Keys.ProviderProfile(providerProfileId), fresh, ProfileTtl);
+
+        return fresh;
+    }
+
+    /// <summary>
+    /// Brise keširan javni profil. Poziva se pri svakoj izmeni koja se u njemu
+    /// vidi — inace bi korisnik izmenio profil i do 5 minuta gledao staro stanje.
+    /// </summary>
+    private Task InvalidateProfileAsync(int providerProfileId) =>
+        cache.RemoveAsync(CacheService.Keys.ProviderProfile(providerProfileId));
 
     // ── UPDATE ─────────────────────────────────────────────────────────────
     public async Task<(bool Success, string? Error)> UpdateAsync(
@@ -157,6 +193,8 @@ public sealed class ProviderService(
         db.ProviderCategories.AddRange(newCategories);
 
         await db.SaveChangesAsync();
+        await InvalidateProfileAsync(profile.Id);
+
         return (true, null);
     }
 
@@ -191,6 +229,7 @@ public sealed class ProviderService(
         var relativeUrl = $"/uploads/covers/{fileName}";
         profile.CoverImageUrl = relativeUrl;
         await db.SaveChangesAsync();
+        await InvalidateProfileAsync(profile.Id);
 
         // Vraća se pun URL jer ovaj metod ne prolazi kroz DTO serijalizaciju.
         var absoluteUrl = MediaUrls.ToAbsolute(relativeUrl, config["App:BaseUrl"] ?? string.Empty)!;
@@ -243,73 +282,6 @@ public sealed class ProviderService(
             ListingTitle   = r.Listing.Title,
             CreatedAt      = r.CreatedAt
         }).ToList();
-    }
-
-    // ── REFERRAL NAGRADA (interna metoda) ──────────────────────────────────
-    /// <summary>
-    /// Proverava da li postoji Pending referral za ovog korisnika.
-    /// Ako postoji — isplaćuje nagradu referreru:
-    ///   • Referral.Status = Rewarded
-    ///   • TokenTransaction za referrera
-    ///   • Referrer.TokenBalance += X
-    ///   • Notifikacija referreru
-    /// Ova metoda nikad ne baca exception — tiho loguje greške da ne blokira aktivaciju.
-    /// </summary>
-    private async Task TryRewardReferrerAsync(string newProviderId)
-    {
-        try
-        {
-            var referral = await db.Referrals
-                .Include(r => r.Referrer)
-                .FirstOrDefaultAsync(r =>
-                    r.ReferredUserId == newProviderId &&
-                    r.Status == ReferralStatus.Pending);
-
-            if (referral is null) return; // ovaj korisnik nije bio pozvan
-
-            var rewardTokens = config.GetValue<decimal>(
-                "Referral:ProviderActivationRewardTokens", 5m);
-
-            // 1. Označi referral kao nagrađen
-            referral.Status       = ReferralStatus.Rewarded;
-            referral.RewardedAt   = DateTime.UtcNow;
-            referral.TokensAwarded = rewardTokens;
-
-            // 2. Uvećaj token balans referrera
-            var referrer = referral.Referrer;
-            referrer.TokenBalance += rewardTokens;
-
-            // 3. Kreiraj TokenTransaction za audit trail
-            var tx = new TokenTransaction
-            {
-                UserId       = referrer.Id,
-                Amount       = rewardTokens,
-                Kind         = TokenKind.Referral,
-                ReferenceId  = referral.Id,
-                Description  = "Referral nagrada — pozvanik aktivirao provajder nalog",
-                BalanceAfter = referrer.TokenBalance,
-                CreatedAt    = DateTime.UtcNow
-            };
-            db.TokenTransactions.Add(tx);
-
-            await userManager.UpdateAsync(referrer);
-
-            await notificationService.SendAsync(
-                referrer.Id,
-                NotificationKind.ReferralRewarded,
-                "Zaradili ste tokene!",
-                $"Vaš pozvanik je aktivirao provajder nalog. Nagrađeni ste sa {rewardTokens} tokena.",
-                referral.Id);
-
-            logger.LogInformation(
-                "Referral nagrada isplaćena: referrerId={ReferrerId}, tokens={Tokens}",
-                referrer.Id, rewardTokens);
-        }
-        catch (Exception ex)
-        {
-            // Ne blokiramo aktivaciju zbog greške u referral logici
-            logger.LogError(ex, "Greška pri isplati referral nagrade za userId={UserId}", newProviderId);
-        }
     }
 
     // ── SHARED GET PROFILE DTO ─────────────────────────────────────────────

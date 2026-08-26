@@ -1,0 +1,89 @@
+# Pravila stila za ceo projekat.
+#
+# ZAŠTO POSTOJI: `dotnet format --verify-no-changes` u CI-ju mora da zna po čemu
+# sudi. Bez ovog fajla koristi podrazumevana pravila, a ona se sa stilom ovog
+# koda razilaze na jednoj tački — vidi napomenu o poravnavanju na dnu.
+
+root = true
+
+[*]
+charset = utf-8
+end_of_line = crlf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{yml,yaml,json}]
+indent_size = 2
+
+[*.md]
+# Dva razmaka na kraju reda su prelom reda u Markdownu — ne smeju se brisati.
+trim_trailing_whitespace = false
+
+[*.cs]
+indent_size = 4
+
+# ── Generisan kod ────────────────────────────────────────────────────────────
+# EF Core sam piše migracije i pravi ih sa blok-scoped namespace-om (IDE0161).
+# Nema smisla ih ručno preformatirati: `dotnet ef migrations add` bi sledeću
+# opet napisao po svom, pa bi CI padao na kodu koji niko nije napisao.
+#
+# `generated_code = true` govori analizatorima da preskoče ceo folder.
+[Migrations/**.cs]
+generated_code = true
+dotnet_analyzer_diagnostic.severity = none
+
+# ── Organizacija using-a ─────────────────────────────────────────────────────
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:warning
+
+# ── Moderne C# konstrukcije koje ovaj kod već koristi ────────────────────────
+csharp_style_namespace_declarations = file_scoped:warning
+csharp_style_expression_bodied_methods = when_on_single_line:silent
+csharp_style_expression_bodied_properties = when_on_single_line:suggestion
+csharp_prefer_braces = when_multiline:silent
+csharp_style_prefer_primary_constructors = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+
+# ── Pravila koja stvarno hvataju greške ──────────────────────────────────────
+dotnet_style_null_propagation = true:warning
+dotnet_style_coalesce_expression = true:warning
+dotnet_style_prefer_is_null_check_over_reference_equality_method = true:warning
+csharp_style_pattern_matching_over_is_with_cast_check = true:warning
+csharp_style_pattern_matching_over_as_with_null_check = true:warning
+
+# ── Imenovanje ───────────────────────────────────────────────────────────────
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols  = private_fields
+dotnet_naming_rule.private_fields_underscore.style    = underscore_prefix
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.underscore_prefix.required_prefix = _
+dotnet_naming_style.underscore_prefix.capitalization  = camel_case
+
+# ═══════════════════════════════════════════════════════════════════════════
+# NAPOMENA O `dotnet format whitespace`
+#
+# Ovaj kod dosledno poravnava deklaracije u kolone:
+#
+#     AppDbContext                 db,
+#     UserManager<ApplicationUser> userManager,
+#     IWebHostEnvironment          env,
+#
+# `dotnet format whitespace` to smatra greškom i sabio bi sve na jedan razmak.
+# Ne postoji opcija u .editorconfig-u koja mu kaže da poravnavanje ostavi na
+# miru — .NET formatter jednostavno nema pojam "align consecutive assignments".
+#
+# Zato CI pokreće SAMO `dotnet format style` i `dotnet format analyzers`, a NE
+# `dotnet format whitespace`. Ta dva proveravaju stvarna pravila jezika
+# (using-e, pattern matching, null provere, imenovanje), dok je poravnavanje
+# stvar čitljivosti oko koje smo se već odlučili.
+#
+# Ako ikad poželiš da pređeš na formatterov stil, jedna komanda to uradi:
+#     dotnet format UsluzionicaServer.sln whitespace
+# i tek onda ima smisla dodati `whitespace` u CI.
+# ═══════════════════════════════════════════════════════════════════════════

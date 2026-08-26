@@ -13,6 +13,10 @@ using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Hubs;
 using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Infrastructure.Media;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using UsluzionicaServer.Infrastructure.Redis;
+using UsluzionicaServer.Infrastructure.Search;
 using UsluzionicaServer.Middleware;
 using UsluzionicaServer.Persistence;
 using UsluzionicaServer.Services;
@@ -140,6 +144,16 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+// ── Redis (Faza B) ─────────────────────────────────────────────────────────
+// Registruje se PRE SignalR-a jer backplane ispod traži vec napravljenu vezu.
+//
+// Sve četiri klase rade i kad Redis nije konfigurisan ili je mrtav — vidi
+// RedisConnection za objašnjenje fail-open pristupa.
+builder.Services.AddSingleton<RedisConnection>();
+builder.Services.AddSingleton<CacheService>();
+builder.Services.AddSingleton<CacheInvalidator>();
+builder.Services.AddSingleton<DistributedLock>();
+
 // ── SignalR ────────────────────────────────────────────────────────────────
 builder.Services.AddSignalR(options =>
 {
@@ -160,6 +174,66 @@ builder.Services.AddSignalR(options =>
         };
 });
 
+// ── KORAK 3: SignalR backplane ─────────────────────────────────────────────
+// SignalR konekcija živi u JEDNOM procesu. Sa dve instance iza load balancera,
+// Ana je zakačena na instancu A a Marko na instancu B. Kad Ana pošalje poruku,
+// instanca A pokuša da je isporuči Marku — a Marko u njenoj memoriji ne postoji.
+// Poruka se tiho izgubi: bez greške, bez loga, samo ne stigne.
+//
+// Backplane to rešava tako što svaki `Clients.User(...)` prolazi kroz Redis
+// pub/sub. Instanca A objavi poruku, sve instance je prime, i ona koja stvarno
+// drži Markovu konekciju je isporuči.
+//
+// Bez ovoga `docker compose up --scale api=2` razbija chat.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Redis:Connection"]))
+{
+    builder.Services.AddSignalR().AddStackExchangeRedis(
+        builder.Configuration["Redis:Connection"]!,
+        options =>
+        {
+            // Prefiks odvaja naše kanale od svega drugog na istoj Redis instanci.
+            options.Configuration.ChannelPrefix =
+                StackExchange.Redis.RedisChannel.Literal("usluzionica:signalr");
+
+            // Isto kao u RedisConnection: start aplikacije ne sme zavisiti
+            // od toga da li je Redis živ u tom trenutku.
+            options.Configuration.AbortOnConnectFail = false;
+        });
+}
+
+// ── KORAK 2: Data Protection ključevi ──────────────────────────────────────
+// ASP.NET ovim ključevima potpisuje i šifruje sve što mora preživeti odlazak
+// od servera i vratiti se nazad — kod ovde pre svega Identity tokene za potvrdu
+// emaila i reset lozinke.
+//
+// Podrazumevano se ključevi čuvaju u lokalnom folderu procesa. To pravi DVE
+// tihe greške:
+//   1. RESTART — kontejner dobije prazan folder, generiše nove kljuceve, i SVI
+//      verifikacioni linkovi poslati pre restarta postaju nevažeći. Korisnik
+//      klikne link iz mejla i dobije "link je istekao", iako nije.
+//   2. DVE INSTANCE — svaka ima svoje kljuceve. Link generisan na instanci A ne
+//      može da se pročita na instanci B, pa potvrda emaila radi otprilike u
+//      pola slučajeva, nasumično.
+//
+// Redis to rešava: ključevi su na jednom mestu i preživljavaju restart.
+if (!string.IsNullOrWhiteSpace(builder.Configuration["Redis:Connection"]))
+{
+    var dpMux = StackExchange.Redis.ConnectionMultiplexer.Connect(
+        new StackExchange.Redis.ConfigurationOptions
+        {
+            EndPoints         = { builder.Configuration["Redis:Connection"]! },
+            AbortOnConnectFail = false,
+            ClientName        = "usluzionica-dataprotection"
+        });
+
+    builder.Services.AddDataProtection()
+        .PersistKeysToStackExchangeRedis(dpMux, "usluzionica:dataprotection-keys")
+        // SetApplicationName mora biti ISTO na svim instancama. Podrazumevano
+        // je ime aplikacije iz okruženja, što se između kontejnera može
+        // razlikovati — a različito ime znači da ključevi ne važe unakrsno.
+        .SetApplicationName("Usluzionica");
+}
+
 // ── Application Services ──────────────────────────────────────────────────
 builder.Services.AddHttpClient("GeoApi", c =>
 {
@@ -177,6 +251,7 @@ builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ListingService>();
 builder.Services.AddScoped<ProviderService>();
+builder.Services.AddScoped<ReferralService>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<ReviewService>();
@@ -189,6 +264,11 @@ builder.Services.AddScoped<AdminService>();
 // Singleton servisi (žive dok god živi aplikacija)
 builder.Services.AddSingleton<MessageEncryption>();
 builder.Services.AddSingleton<OnlineTracker>();
+
+// Foldovana imena 188 kategorija, keširana u memoriji sa TTL-om.
+// Singleton jer je isto za sve zahteve; sopstveni scope za DbContext pravi
+// sam, pošto singleton ne sme držati scoped zavisnost.
+builder.Services.AddSingleton<CategorySearchIndex>();
 
 // Background servis za čišćenje starih poruka
 builder.Services.AddHostedService<MessageCleanupService>();
@@ -347,8 +427,21 @@ builder.Services.AddRateLimiter(options =>
 });
 
 // ── Health check ───────────────────────────────────────────────────────────
-builder.Services.AddHealthChecks()
-    .AddSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")!);
+var healthChecks = builder.Services.AddHealthChecks()
+    .AddSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection")!,
+        name: "sqlserver");
+
+// Redis se dodaje u /health SAMO ako je konfigurisan. Da se dodaje bezuslovno,
+// lokalno pokretanje bez Redis-a bi vraćalo 503 i Docker bi kontejner proglasio
+// bolesnim — iako aplikacija radi savršeno.
+//
+// Tags su bitni: "ready" znači "sme da prima saobraćaj". Redis NIJE u toj grupi
+// jer aplikacija bez njega radi (sporije). Da je označen kao ready, ispad
+// Redis-a bi load balancer naterao da skine instancu iz rotacije bez potrebe.
+var redisConn = builder.Configuration["Redis:Connection"];
+if (!string.IsNullOrWhiteSpace(redisConn))
+    healthChecks.AddRedis(redisConn, name: "redis", tags: ["cache"]);
 
 var app = builder.Build();
 
@@ -361,6 +454,13 @@ using (var scope = app.Services.CreateScope())
 
     await db.Database.MigrateAsync();
     await SeedRolesAndAdminAsync(roleManager, userManager, builder.Configuration);
+
+    // Popunjava Search* kolone za redove indeksirane starom verzijom pravila.
+    // Mora POSLE migracije (kolone tada postoje) i posle seed-a (da i admin
+    // korisnik dobije indeks). Idempotentno — na već indeksiranoj bazi ne radi
+    // ništa i ne usporava start.
+    await SearchIndexBackfill.RunAsync(
+        db, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
 }
 
 // ── Middleware pipeline ────────────────────────────────────────────────────
@@ -382,7 +482,46 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
-app.MapHealthChecks("/health");
+// ── Health check endpointi ─────────────────────────────────────────────────
+// DVA endpointa, namerno, jer odgovaraju na dva različita pitanja.
+//
+// Otkriveno testom: sa jednim endpointom koji pokreće SVE provere, gašenje
+// Redis-a je vraćalo 503 — iako su /api/categories i pretraga i dalje radili
+// normalno. Docker bi kontejner proglasio bolesnim, a load balancer bi ga
+// skinuo iz rotacije. Zbog keša. Sam tag `cache` na proveri ne radi ništa;
+// mora mu se dodati predikat koji ga zaista filtrira.
+
+// /health — "smem li da primam saobraćaj?"
+// Samo ono bez čega aplikacija NE MOŽE da radi. Redis je isključen jer bez
+// njega radi (sporije). Ovo gađaju Docker healthcheck i cloud probe.
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    Predicate = check => !check.Tags.Contains("cache")
+});
+
+// /health/full — "da li je baš sve u redu?"
+// Sve provere uključujući Redis. Za monitoring i ručnu dijagnostiku: ovde se
+// vidi da je keš pao, a da to nije razlog za skidanje instance iz rotacije.
+app.MapHealthChecks("/health/full", new HealthCheckOptions
+{
+    ResponseWriter = async (context, report) =>
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new
+        {
+            status = report.Status.ToString(),
+            checks = report.Entries.ToDictionary(
+                e => e.Key,
+                e => new
+                {
+                    status = e.Value.Status.ToString(),
+                    tags   = e.Value.Tags,
+                    error  = e.Value.Exception?.Message
+                }),
+            duration = report.TotalDuration.TotalMilliseconds
+        });
+    }
+});
 
 // SignalR hub rute
 app.MapHub<ChatHub>("/hubs/chat");

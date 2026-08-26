@@ -228,6 +228,15 @@ namespace UsluzionicaServer.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("SearchName")
+                        .IsRequired()
+                        .HasMaxLength(400)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(400)");
+
+                    b.Property<int>("SearchVersion")
+                        .HasColumnType("int");
+
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("nvarchar(max)");
 
@@ -256,6 +265,9 @@ namespace UsluzionicaServer.Migrations
                     b.HasIndex("ReferralCode")
                         .IsUnique()
                         .HasFilter("[ReferralCode] IS NOT NULL");
+
+                    b.HasIndex("SearchName")
+                        .HasDatabaseName("IX_AspNetUsers_SearchName");
 
                     b.ToTable("AspNetUsers", (string)null);
                 });
@@ -2028,6 +2040,25 @@ namespace UsluzionicaServer.Migrations
                     b.Property<int>("ProviderProfileId")
                         .HasColumnType("int");
 
+                    b.Property<string>("SearchBody")
+                        .IsRequired()
+                        .HasColumnType("varchar(max)");
+
+                    b.Property<string>("SearchLocation")
+                        .IsRequired()
+                        .HasMaxLength(420)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(420)");
+
+                    b.Property<string>("SearchTitle")
+                        .IsRequired()
+                        .HasMaxLength(700)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(700)");
+
+                    b.Property<int>("SearchVersion")
+                        .HasColumnType("int");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -2050,7 +2081,14 @@ namespace UsluzionicaServer.Migrations
 
                     b.HasIndex("ProviderProfileId");
 
-                    b.HasIndex("Status", "IsBoosted");
+                    b.HasIndex("SearchLocation", "Status")
+                        .HasDatabaseName("IX_Listings_SearchLocation");
+
+                    b.HasIndex("Status", "IsBoosted", "BoostScore", "CreatedAt")
+                        .IsDescending(false, true, true, true)
+                        .HasDatabaseName("IX_Listings_Search_Active");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Status", "IsBoosted", "BoostScore", "CreatedAt"), new[] { "SearchTitle", "SearchLocation", "CategoryId" });
 
                     b.ToTable("Listings");
                 });
@@ -2320,6 +2358,12 @@ namespace UsluzionicaServer.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("ActivationRewardedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("ActivationTokensAwarded")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -2336,16 +2380,16 @@ namespace UsluzionicaServer.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
-                    b.Property<DateTime?>("RewardedAt")
+                    b.Property<DateTime?>("SignupRewardedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("SignupTokensAwarded")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
-
-                    b.Property<decimal?>("TokensAwarded")
-                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 

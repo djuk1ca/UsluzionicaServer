@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Admin;
+using UsluzionicaServer.Infrastructure.Search;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
@@ -18,7 +19,19 @@ public sealed class AdminService(AppDbContext db, NotificationService notificati
         var query = db.Users.AsNoTracking();
 
         if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(u => u.FullName.Contains(search) || u.Email!.Contains(search));
+        {
+            // Ime se pretražuje preko foldovane kolone (indeksirana), pa
+            // „milos" nalazi „Miloš" a „djordje" nalazi „Đorđe". Email ostaje
+            // direktno poređenje — email adrese su ionako ASCII.
+            var folded  = SearchNormalizer.Fold(search);
+            var pattern = "%" + SearchNormalizer.EscapeLike(folded) + "%";
+            var raw     = search.Trim();
+
+            query = folded.Length > 0
+                ? query.Where(u => EF.Functions.Like(u.SearchName, pattern, "\\")
+                                || u.Email!.Contains(raw))
+                : query.Where(u => u.Email!.Contains(raw));
+        }
 
         var total = await query.CountAsync();
 

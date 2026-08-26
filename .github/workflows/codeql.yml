@@ -1,0 +1,90 @@
+name: CodeQL
+
+# ŠTA JE CodeQL
+# GitHub-ov alat za statičku analizu bezbednosti. Ne pokreće kod — prevodi ga u
+# bazu podataka nad kojom se onda izvršavaju upiti koji traže poznate obrasce
+# ranjivosti: SQL injection, path traversal, hardkodovane tajne, nebezbedna
+# deserijalizacija, slabu kriptografiju.
+#
+# KAKO SE RAZLIKUJE OD `-warnaserror`
+# Kompajler gleda JEDAN fajl i pita "da li je ovo validan C#". CodeQL prati
+# TOK PODATKA kroz ceo projekat i pita "može li nešto što je korisnik uneo da
+# stigne do mesta gde je opasno". Zato hvata stvari koje kompajler ne može:
+# vrednost iz query stringa koja završi u `Path.Combine`, korisnički unos koji
+# uđe u SQL bez parametrizacije.
+#
+# GDE SE VIDE REZULTATI
+# Repo → Security → Code scanning alerts. Na PR-u se pojavljuju kao komentari
+# uz konkretne linije.
+#
+# ŠTA OD OVOGA IMA SMISLA OVDE
+# EF Core parametrizuje sve upite pa je SQL injection malo verovatan, ali:
+#   • `ProviderService.UploadCoverAsync` sklapa putanju iz `file.FileName`
+#   • `MessageEncryption` koristi AES — CodeQL proverava režim i rukovanje IV-om
+#   • JWT validacija i rukovanje tajnama su tačno ono što CodeQL cilja
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Nedeljno skeniranje ponedeljkom u 6:00 UTC.
+    #
+    # ZAŠTO PO RASPOREDU, kad se ionako pokreće na svaki push:
+    # CodeQL baza upita se stalno dopunjava. Ranjivost objavljena danas može
+    # pogoditi kod koji nije menjan mesecima — a bez ovoga bi se otkrila tek
+    # pri sledećoj izmeni tog fajla.
+    - cron: '0 6 * * 1'
+
+# Isti razlog kao u CI-ju: dva brza push-a ne treba da drže dva skeniranja.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analiza (${{ matrix.language }})
+    runs-on: ubuntu-latest
+
+    permissions:
+      # OBAVEZNO — bez ovoga upload rezultata pada sa 403.
+      security-events: write
+      # Potrebno za privatne repozitorijume.
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['csharp']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Postavi .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Inicijalizuj CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # `security-and-quality` je širi od podrazumevanog `security-extended`:
+          # pored bezbednosti hvata i greške u korektnosti (mrtav kod, poređenja
+          # koja su uvek tačna, resurse koji se ne oslobađaju).
+          queries: security-and-quality
+
+      # CodeQL za C# MORA da vidi pravi build — analizira IL, ne izvorni tekst.
+      # Autobuild najčešće uspe, ali eksplicitan build je predvidljiviji:
+      # jasno se vidi šta je gradio i sa kojim configuration-om.
+      - name: Build
+        run: |
+          dotnet restore UsluzionicaServer.sln
+          dotnet build UsluzionicaServer.sln --no-restore --configuration Release
+
+      - name: Analiziraj
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"

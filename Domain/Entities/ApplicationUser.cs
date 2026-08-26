@@ -14,6 +14,12 @@ public class ApplicationUser : IdentityUser
     public bool            IsActive        { get; set; } = true;
     public string?         ReferralCode    { get; set; }   // 8-char unique, generisan pri registraciji
 
+    // ── Denormalizovani indeks za pretragu ─────────────────────────────────
+    // Održava AppDbContext.SaveChanges kroz SearchIndexer. Koristi ga admin
+    // pretraga korisnika, da "milos" nađe i "Miloš".
+    public string SearchName    { get; set; } = string.Empty;
+    public int    SearchVersion { get; set; }
+
     // Navigation
     public ProviderProfile?             ProviderProfile      { get; set; }
     public ICollection<Referral>        ReferralsSent        { get; set; } = [];  // korisnici koje je ovaj pozvao

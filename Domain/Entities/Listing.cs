@@ -22,6 +22,26 @@ public class Listing
     public DateTime      CreatedAt         { get; set; } = DateTime.UtcNow;
     public DateTime      UpdatedAt         { get; set; } = DateTime.UtcNow;
 
+    // ── Denormalizovani indeks za pretragu ─────────────────────────────────
+    // Foldovane kopije Title/Location/Description (mala slova, bez dijakritike,
+    // ćirilica preslovljena). Održava ih AppDbContext.SaveChanges kroz
+    // SearchIndexer — NIKAD se ne postavljaju ručno u servisima.
+    //
+    // Postoje da bi upit i sadržaj završili u istom obliku, pa da "sisanje"
+    // nađe "Šišanje" bez zavisnosti od collation-a baze.
+
+    /// <summary>Fold(Title). Visok signal — indeksiran.</summary>
+    public string SearchTitle    { get; set; } = string.Empty;
+
+    /// <summary>Fold(Location). Odvojen da filter grada bude indeksirani seek.</summary>
+    public string SearchLocation { get; set; } = string.Empty;
+
+    /// <summary>Fold(Description). Nizak signal — pretražuje se samo kad je gornji sloj tanak.</summary>
+    public string SearchBody     { get; set; } = string.Empty;
+
+    /// <summary>Verzija pravila preklapanja kojom je red indeksiran. Vidi SearchIndexBackfill.</summary>
+    public int    SearchVersion  { get; set; }
+
     // Navigation
     public ProviderProfile               ProviderProfile       { get; set; } = null!;
     public Category                      Category              { get; set; } = null!;

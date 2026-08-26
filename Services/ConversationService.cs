@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
@@ -32,6 +32,13 @@ public sealed class ConversationService(
             .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .ToListAsync();
 
+        // Online status za SVE sagovornike odjednom.
+        // Ranije je `tracker.IsOnline(...)` pozivan unutar petlje; sa Redis-om
+        // bi to bilo N odvojenih mrežnih obilazaka po otvaranju liste.
+        // Jedan batch poziv umesto toga šalje sve upite kroz isti pipeline.
+        var onlineIds = await tracker.WhoIsOnlineAsync(
+            conversations.Select(c => c.User1Id == userId ? c.User2Id : c.User1Id));
+
         var result = new List<ConversationDto>();
 
         foreach (var c in conversations)
@@ -63,7 +70,7 @@ public sealed class ConversationService(
                 OtherUserId       = other.Id,
                 OtherUserName     = other.FullName,
                 OtherUserImageUrl = other.ProfileImageUrl,
-                OtherUserIsOnline = tracker.IsOnline(other.Id),
+                OtherUserIsOnline = onlineIds.Contains(other.Id),
                 LastMessagePreview = preview,
                 LastMessageAt      = c.LastMessageAt,
                 UnreadCount        = unread,
@@ -263,7 +270,7 @@ public sealed class ConversationService(
             OtherUserId       = other.Id,
             OtherUserName     = other.FullName,
             OtherUserImageUrl = other.ProfileImageUrl,
-            OtherUserIsOnline = tracker.IsOnline(other.Id),
+            OtherUserIsOnline = await tracker.IsOnlineAsync(other.Id),
             LastMessagePreview = null,
             LastMessageAt      = c.LastMessageAt,
             UnreadCount        = 0,

@@ -1,0 +1,72 @@
+Summary
+  Generated on: 8/26/2026 - 6:41:41 PM
+  Coverage date: 8/26/2026 - 6:40:34 PM - 8/26/2026 - 6:41:21 PM
+  Parser: MultiReport (2x Cobertura)
+  Assemblies: 1
+  Classes: 50
+  Files: 50
+  Line coverage: 82.5%
+  Covered lines: 1194
+  Uncovered lines: 253
+  Coverable lines: 1447
+  Total lines: 6109
+  Branch coverage: 64.9% (200 of 308)
+  Covered branches: 200
+  Total branches: 308
+  Method coverage: 58.1% (75 of 129)
+  Full method coverage: 53.4% (69 of 129)
+  Covered methods: 75
+  Fully covered methods: 69
+  Total methods: 129
+
+UsluzionicaServer                                               82.5%
+  UsluzionicaServer.Controllers.AdminController                    0%
+  UsluzionicaServer.Controllers.AuthController                   100%
+  UsluzionicaServer.Controllers.BookingsController                 0%
+  UsluzionicaServer.Controllers.CategoriesController               0%
+  UsluzionicaServer.Controllers.ConversationsController            0%
+  UsluzionicaServer.Controllers.DiscountOffersController           0%
+  UsluzionicaServer.Controllers.FavoritesController                0%
+  UsluzionicaServer.Controllers.ListingsController                 0%
+  UsluzionicaServer.Controllers.LocationsController                0%
+  UsluzionicaServer.Controllers.NotificationsController            0%
+  UsluzionicaServer.Controllers.ProviderController                 0%
+  UsluzionicaServer.Controllers.ReferralsController                0%
+  UsluzionicaServer.Controllers.ReviewsController                  0%
+  UsluzionicaServer.Controllers.TokensController                   0%
+  UsluzionicaServer.Controllers.UsersController                  100%
+  UsluzionicaServer.Domain.Entities.Referral                       0%
+  UsluzionicaServer.DTOs.Listings.PagedResult<T>                  50%
+  UsluzionicaServer.Hubs.ChatHub                                   0%
+  UsluzionicaServer.Infrastructure.BoostExpiryService              0%
+  UsluzionicaServer.Infrastructure.Media.MediaUrlJsonModifier    100%
+  UsluzionicaServer.Infrastructure.Media.MediaUrls               100%
+  UsluzionicaServer.Infrastructure.MessageCleanupService           0%
+  UsluzionicaServer.Infrastructure.MessageEncryption             100%
+  UsluzionicaServer.Infrastructure.OnlineTracker                   0%
+  UsluzionicaServer.Infrastructure.Redis.CacheInvalidator       19.2%
+  UsluzionicaServer.Infrastructure.Redis.CacheService              0%
+  UsluzionicaServer.Infrastructure.Redis.DistributedLock           0%
+  UsluzionicaServer.Infrastructure.Redis.RedisConnection        32.1%
+  UsluzionicaServer.Infrastructure.Search.CategorySearchIndex   85.7%
+  UsluzionicaServer.Infrastructure.Search.Fuzzy                  100%
+  UsluzionicaServer.Infrastructure.Search.PredicateBuilder       100%
+  UsluzionicaServer.Infrastructure.Search.SearchIndexer          100%
+  UsluzionicaServer.Infrastructure.Search.SearchNormalizer       100%
+  UsluzionicaServer.Infrastructure.Search.SearchQuery           91.6%
+  UsluzionicaServer.Infrastructure.SecretsGuard                  100%
+  UsluzionicaServer.Infrastructure.SerbianMunicipalities         100%
+  UsluzionicaServer.Persistence.AppDbContext                    98.2%
+  UsluzionicaServer.Services.AuthService                           0%
+  UsluzionicaServer.Services.BookingService                      100%
+  UsluzionicaServer.Services.BoostService                        100%
+  UsluzionicaServer.Services.CategoryService                       0%
+  UsluzionicaServer.Services.EmailService                          0%
+  UsluzionicaServer.Services.ListingService                     93.1%
+  UsluzionicaServer.Services.NotificationService                 100%
+  UsluzionicaServer.Services.ProviderService                       0%
+  UsluzionicaServer.Services.ReferralService                     100%
+  UsluzionicaServer.Services.ReviewService                         0%
+  UsluzionicaServer.Services.TokenService                        100%
+  UsluzionicaServer.Services.TokenWalletService                  100%
+  UsluzionicaServer.Services.UserService                          59%

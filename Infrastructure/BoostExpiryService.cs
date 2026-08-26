@@ -1,5 +1,6 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Enums;
+using UsluzionicaServer.Infrastructure.Redis;
 using UsluzionicaServer.Persistence;
 using UsluzionicaServer.Services;
 
@@ -22,6 +23,7 @@ namespace UsluzionicaServer.Infrastructure;
 /// </summary>
 public sealed class BoostExpiryService(
     IServiceScopeFactory scopeFactory,
+    DistributedLock      locks,
     ILogger<BoostExpiryService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -53,6 +55,13 @@ public sealed class BoostExpiryService(
     {
         try
         {
+            // Tačno jedna instanca sme da izvrši ovaj posao.
+            // Bez ovoga bi se sa dve instance API-ja svaki oglas dvaput izgubio isti BoostScore.
+            // TTL od 5 minuta je duži od trajanja posla, a kraći od intervala
+            // ponavljanja — ako instanca pukne, lock se sam oslobodi.
+            await using var lease = await locks.TryAcquireAsync("boost-expiry", TimeSpan.FromMinutes(5));
+            if (lease is null) return;
+
             await using var scope               = scopeFactory.CreateAsyncScope();
             var db                              = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var notificationService             = scope.ServiceProvider.GetRequiredService<NotificationService>();

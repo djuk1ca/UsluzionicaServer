@@ -18,9 +18,6 @@ namespace UsluzionicaServer.IntegrationTests.Infrastructure;
 /// referral koda i vezivanje kategorija su deo pravila koja testiramo. Da
 /// ubacujemo redove direktno, testirali bismo izmišljeno stanje koje se u
 /// produkciji nikad ne pojavljuje.
-///
-/// Izuzetak je `EmailConfirmed` — postavlja se direktno jer bi inače svaki
-/// test morao da prođe kroz slanje i potvrdu emaila.
 /// </summary>
 public sealed class TestData(UsluzionicaWebFactory factory)
 {
@@ -41,11 +38,27 @@ public sealed class TestData(UsluzionicaWebFactory factory)
         decimal tokenBalance = 0m,
         string? referralCode = null)
     {
-        using var scope = factory.Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var auth  = scope.ServiceProvider.GetRequiredService<AuthService>();
+        await CreateUnconfirmedUserAsync(email, fullName, referralCode);
+        await ConfirmEmailAsync(email);
 
-        // Kroz pravu registraciju da referral logika i heširanje budu stvarni.
+        if (tokenBalance != 0m)
+        {
+            var user = await FindAsync(email);
+            await SetTokenBalanceAsync(user.Id, tokenBalance);
+        }
+
+        return await FindAsync(email);
+    }
+
+    /// <summary>Korisnik BEZ potvrđenog emaila — za testove koji dokazuju da ga pravilo odbija.</summary>
+    public async Task<ApplicationUser> CreateUnconfirmedUserAsync(
+        string  email,
+        string  fullName     = "Nepotvrđeni Korisnik",
+        string? referralCode = null)
+    {
+        using var scope = factory.Services.CreateScope();
+        var auth = scope.ServiceProvider.GetRequiredService<AuthService>();
+
         var (ok, errors) = await auth.RegisterAsync(new UsluzionicaServer.DTOs.Auth.RegisterRequest
         {
             FullName     = fullName,
@@ -58,31 +71,38 @@ public sealed class TestData(UsluzionicaWebFactory factory)
             throw new InvalidOperationException(
                 $"Priprema korisnika '{email}' nije uspela: {string.Join(", ", errors)}");
 
-        var user = await users.FindByEmailAsync(email)
-                   ?? throw new InvalidOperationException($"Korisnik '{email}' nije nađen posle registracije.");
-
-        user.EmailConfirmed = true;
-        if (tokenBalance != 0m) user.TokenBalance = tokenBalance;
-        await users.UpdateAsync(user);
-
-        return user;
+        return await FindAsync(email);
     }
 
-    /// <summary>Korisnik BEZ potvrđenog emaila — za testove koji dokazuju da ga pravilo odbija.</summary>
-    public async Task<ApplicationUser> CreateUnconfirmedUserAsync(
-        string email, string fullName = "Nepotvrđeni Korisnik")
+    /// <summary>
+    /// Potvrđuje email PRAVIM Identity tokenom i okida prvu referral ratu —
+    /// tačno dva koraka koje radi AuthController.VerifyEmail.
+    ///
+    /// Zašto ne prosto `user.EmailConfirmed = true`: od izmene referral sistema
+    /// potvrda emaila je trenutak isplate prve rate. Da se zastavica postavlja
+    /// direktno, nijedan test ne bi mogao da dokaže da se ta rata isplaćuje —
+    /// a priprema podataka bi tiho zaobilazila pravilo koje testiramo.
+    /// </summary>
+    public async Task ConfirmEmailAsync(string email)
     {
         using var scope = factory.Services.CreateScope();
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-        var auth  = scope.ServiceProvider.GetRequiredService<AuthService>();
+        var users     = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        var referrals = scope.ServiceProvider.GetRequiredService<ReferralService>();
 
-        await auth.RegisterAsync(new UsluzionicaServer.DTOs.Auth.RegisterRequest
-        {
-            FullName = fullName, Email = email, Password = DefaultPassword
-        });
+        var user = await users.FindByEmailAsync(email)
+                   ?? throw new InvalidOperationException($"Korisnik '{email}' nije nađen.");
 
-        return await users.FindByEmailAsync(email)
-               ?? throw new InvalidOperationException($"Korisnik '{email}' nije nađen.");
+        if (user.EmailConfirmed) return;
+
+        var token  = await users.GenerateEmailConfirmationTokenAsync(user);
+        var result = await users.ConfirmEmailAsync(user, token);
+
+        if (!result.Succeeded)
+            throw new InvalidOperationException(
+                $"Potvrda emaila '{email}' nije uspela: " +
+                string.Join(", ", result.Errors.Select(e => e.Description)));
+
+        await referrals.TryRewardSignupAsync(user.Id);
     }
 
     // ── Provajder ──────────────────────────────────────────────────────────
@@ -91,9 +111,10 @@ public sealed class TestData(UsluzionicaWebFactory factory)
     public async Task<(ApplicationUser User, int ProviderProfileId)> CreateProviderAsync(
         string  email,
         string  profession   = "Vodoinstalater",
-        decimal tokenBalance = 0m)
+        decimal tokenBalance = 0m,
+        string  fullName     = "Test Korisnik")
     {
-        var user = await CreateConfirmedUserAsync(email, tokenBalance: tokenBalance);
+        var user = await CreateConfirmedUserAsync(email, fullName: fullName, tokenBalance: tokenBalance);
 
         using var scope = factory.Services.CreateScope();
         var providers = scope.ServiceProvider.GetRequiredService<ProviderService>();
@@ -164,5 +185,28 @@ public sealed class TestData(UsluzionicaWebFactory factory)
             .Where(u => u.Id == userId)
             .Select(u => u.TokenBalance)
             .FirstAsync();
+    }
+
+    /// <summary>Referral kod korisnika — ono što se deli prijateljima.</summary>
+    public async Task<string> GetReferralCodeAsync(string userId)
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        return await db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => u.ReferralCode!)
+            .FirstAsync();
+    }
+
+    // ── Pomoćno ────────────────────────────────────────────────────────────
+
+    private async Task<ApplicationUser> FindAsync(string email)
+    {
+        using var scope = factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        return await users.FindByEmailAsync(email)
+               ?? throw new InvalidOperationException($"Korisnik '{email}' nije nađen.");
     }
 }

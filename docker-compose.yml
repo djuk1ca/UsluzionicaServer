@@ -1,0 +1,109 @@
+﻿name: usluzionica
+
+services:
+  # ═══ BAZA ═══════════════════════════════════════════════════════════════════
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
+      MSSQL_PID: Developer
+    ports:
+      # 14330 na hostu, NE 1433 — tvoj lokalni SQL Server već drži 1433.
+      # Iz kontejnera se i dalje pristupa preko 1433 (vidi connection string).
+      - "14330:1433"
+    volumes:
+      # Imenovani volumen: podaci prežive `docker compose down` i rebuild.
+      # Brišu se tek sa `docker compose down -v`.
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      # U 2022 slici sqlcmd je u mssql-tools18. -C prihvata self-signed sertifikat,
+      # -b vraća ne-nula kod na grešku (bez toga healthcheck uvek prolazi).
+      # $$ je escape — compose ga pretvara u $ da ga shell U KONTEJNERU raširi.
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+  # ═══ KEŠ ════════════════════════════════════════════════════════════════════
+  # Redis JOŠ NIJE integrisan u aplikaciju — to je Faza B. Ovde je da compose
+  # bude kompletan i da vidiš kako servis izgleda. Trenutno se niko ne povezuje;
+  # kontejner samo stoji i troši ~10 MB.
+  cache:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ═══ APLIKACIJA ═════════════════════════════════════════════════════════════
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      db:
+        # OBAVEZNO service_healthy, ne samo `- db`.
+        # Program.cs zove MigrateAsync() PRE app.Run() — ako baza nije spremna,
+        # proces baci izuzetak i kontejner umre. `- db` bi samo čekao da se
+        # kontejner pokrene, ne i da baza prihvata konekcije.
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_HTTP_PORTS: "8080"
+
+      # `db` je ime servisa — Docker mreža ga razrešava u IP kontejnera.
+      # Trusted_Connection=True (iz appsettings.Local.json.example) NE radi na
+      # Linux-u — to je Windows autentikacija. Mora SQL auth sa sa nalogom.
+      # TrustServerCertificate=True jer SQL Server koristi self-signed sertifikat,
+      # a SqlClient 5.x podrazumeva Encrypt=True.
+      # Connect Timeout=5 da /health ne visi ~15 s kad je baza dole.
+      ConnectionStrings__DefaultConnection: "Server=db,1433;Database=UsluzionicaDB;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True;Encrypt=False;MultipleActiveResultSets=True;Connect Timeout=5;"
+
+      Jwt__Secret: ${JWT_SECRET}
+      Jwt__Issuer: usluzionica-api
+      Jwt__Audience: usluzionica-app
+      Encryption__MessageKey: ${ENCRYPTION_KEY}
+      AdminSeed__Email: ${ADMIN_EMAIL}
+      AdminSeed__Password: ${ADMIN_PASSWORD}
+
+      # Bez ovoga bi SVI URL-ovi slika u odgovorima pokazivali na
+      # https://localhost:7176 (podrazumevano iz appsettings.json).
+      App__BaseUrl: ${APP_BASE_URL}
+
+      # Priprema za Fazu B — aplikacija ovo još ne čita.
+      Redis__Connection: "cache:6379"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # -f  → ne-nula izlazni kod na HTTP 4xx/5xx (bez toga curl vraća 0 i za 503)
+      # -sS → bez progress bara, ali greške i dalje vidljive u `docker inspect`
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      # start_period je OBAVEZAN ovde: prvi start izvršava 20 migracija i seeduje
+      # 188 kategorija, što traje 60–90 s. Padovi unutar ovog prozora se NE broje
+      # u `retries`, pa kontejner ne bude proglašen mrtvim dok se tek podiže.
+      start_period: 90s
+    volumes:
+      # Imenovani volumen, NE bind mount (`./uploads:/app/...`).
+      # Razlog: kontejner radi kao non-root. Imenovani volumen nasleđuje
+      # vlasništvo od foldera u slici (koji smo chown-ovali), dok bind mount
+      # nameće vlasništvo sa hosta i upload puca sa "Permission denied".
+      - uploads:/app/wwwroot/uploads
+    restart: unless-stopped
+
+volumes:
+  mssql-data:
+  redis-data:
+  uploads:
