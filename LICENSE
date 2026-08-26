@@ -1,0 +1,54 @@
+Copyright (c) 2026 Đukić. Sva prava zadržana.
+All rights reserved.
+
+═══════════════════════════════════════════════════════════════════════════
+                          SRPSKI
+═══════════════════════════════════════════════════════════════════════════
+
+Ovaj izvorni kod je javno dostupan ISKLJUČIVO radi uvida — za procenu u
+postupku zapošljavanja, obrazovne svrhe i tehnički pregled.
+
+DOZVOLJENO JE:
+  • čitati i pregledati kod
+  • citirati isečke uz navođenje izvora, u obrazovnom kontekstu ili prikazu
+
+NIJE DOZVOLJENO, bez prethodne pisane saglasnosti nosioca prava:
+  • koristiti kod ili bilo koji njegov deo u drugom projektu
+  • kopirati, umnožavati ni distribuirati kod
+  • menjati kod ili praviti izvedena dela
+  • pokretati ovaj softver kao uslugu, komercijalno ili nekomercijalno
+  • koristiti naziv „Uslužionica", logotip ili vizuelni identitet
+
+Postojanje ovog koda na javnom repozitorijumu NE predstavlja odricanje od
+autorskih prava niti davanje licence bilo koje vrste.
+
+SOFTVER SE PRUŽA „TAKAV KAKAV JESTE", BEZ IKAKVIH GARANCIJA. AUTOR NE
+ODGOVARA ZA BILO KAKVU ŠTETU PROISTEKLU IZ UPOTREBE OVOG KODA.
+
+Za dozvolu za bilo kakvu upotrebu: kontaktirati nosioca prava.
+
+═══════════════════════════════════════════════════════════════════════════
+                          ENGLISH
+═══════════════════════════════════════════════════════════════════════════
+
+This source code is made publicly visible SOLELY for inspection — for
+evaluation during hiring processes, educational purposes, and technical review.
+
+YOU MAY:
+  • read and review the code
+  • quote excerpts with attribution, in an educational or review context
+
+YOU MAY NOT, without prior written permission from the copyright holder:
+  • use the code or any part of it in another project
+  • copy, reproduce, or redistribute the code
+  • modify the code or create derivative works
+  • run this software as a service, commercially or non-commercially
+  • use the name "Uslužionica", its logo, or visual identity
+
+Publication of this code in a public repository does NOT constitute a waiver
+of copyright, nor the grant of a license of any kind.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. THE AUTHOR
+SHALL NOT BE LIABLE FOR ANY DAMAGES ARISING FROM THE USE OF THIS CODE.
+
+For permission for any use: contact the copyright holder.
