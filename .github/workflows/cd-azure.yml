@@ -123,8 +123,36 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Isti keš kao u CI-ju — ključ je identičan, pa ovaj job pogodi pakete
+      # koje je CI već preuzeo umesto da ih vuče iznova.
+      - name: Keširaj NuGet pakete
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # OVAJ KORAK JE OBAVEZAN — njegov izostanak je oborio run #4.
+      #
+      # `dotnet ef` NE radi restore sam od sebe: pokreće build nad projektom i
+      # očekuje da `obj/project.assets.json` već postoji. Bez restore-a puca sa
+      #   error NETSDK1004: Assets file '.../obj/project.assets.json' not found.
+      #   Unable to retrieve project metadata. Ensure it's an SDK-style project.
+      #
+      # Druga poruka vodi na pogrešan trag — deluje kao da projekat nije
+      # SDK-style, a fali samo restore. CI ovo nikad nije uhvatio jer tamo
+      # `dotnet restore` stoji eksplicitno pre svakog build-a.
+      - name: Restore
+        run: dotnet restore UsluzionicaServer.csproj
+
+      # Verzija se PRIKUCAVA na 8.x namerno.
+      #
+      # Bez `--version` se povlači najnoviji EF alat — u run-u #4 je to bio
+      # 10.0.11, dok projekat koristi EF Core 8.0.4. Noviji alat nad starijim
+      # runtime-om obično radi, ali razilaženje glavnih verzija je nepotreban
+      # rizik u koraku koji dira produkcionu bazu.
       - name: Instaliraj EF alat
-        run: dotnet tool install --global dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 8.*
 
       - name: Generiši idempotentnu SQL skriptu
         run: >
