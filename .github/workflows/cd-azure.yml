@@ -266,6 +266,30 @@ jobs:
           # SHA tag, ne `latest` — deploy mora biti ponovljiv i vratljiv.
           images: ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:${{ needs.build-and-push.outputs.image-tag }}
 
+      # ── PRAVI HOSTNAME, NE POGOĐEN ───────────────────────────────────────
+      #
+      # Smoke test je do sada sklapao adresu kao
+      # https://<ime-app-servisa>.azurewebsites.net — što je nekad bilo tačno,
+      # ali Azure novije App Service-e pravi sa JEDINSTVENIM hostname-om oblika
+      #   <ime>-<hash>.<region>-01.azurewebsites.net
+      #
+      # `usluzionica-api.azurewebsites.net` zato uopšte ne postoji u DNS-u.
+      # curl je vraćao `000` (bez konekcije) svih 30 pokušaja, a /tmp/health.txt
+      # se nikad nije ni napravio — što izgleda kao da je aplikacija mrtva, a
+      # zapravo se kucalo na adresu koje nema.
+      #
+      # Umesto pogađanja, hostname se čita iz same Azure resurse.
+      - name: Očitaj hostname App Service-a
+        id: host
+        run: |
+          set -euo pipefail
+          HOST=$(az webapp show \
+            --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --query defaultHostName -o tsv)
+          echo "Hostname: $HOST"
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+
       # ── SMOKE TEST ───────────────────────────────────────────────────────
       # Deploy koji je "uspeo" a aplikacija ne odgovara je i dalje neuspeh.
       # Ovaj korak je razlika između "slika je postavljena" i "radi".
@@ -276,15 +300,20 @@ jobs:
       - name: Smoke test /health
         run: |
           set -euo pipefail
-          URL="https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+          URL="https://${{ steps.host.outputs.host }}/health"
           echo "Čekam da $URL odgovori..."
 
           for i in $(seq 1 30); do
-            CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
+            # `|| CODE="000"` a NE `|| echo "000"` unutar substitucije: curl i pri
+            # neuspehu ispiše "000" preko -w, pa su se dva niza spajala i log je
+            # prijavljivao besmislen "HTTP 000000".
+            CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" --max-time 10 "$URL") || CODE="000"
 
             if [[ "$CODE" == "200" ]]; then
               echo "Zdrav posle $((i*10)) s: $(cat /tmp/health.txt)"
               echo "### Deploy uspešan — /health vraća 200" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$URL" >> $GITHUB_STEP_SUMMARY
               exit 0
             fi
 
