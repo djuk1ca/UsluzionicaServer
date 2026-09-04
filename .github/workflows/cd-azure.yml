@@ -54,7 +54,7 @@ jobs:
       image-name: ${{ steps.ime.outputs.slika }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # workflow_run se izvršava nad podrazumevanom granom, pa se commit
           # koji je pokrenuo CI mora eksplicitno navesti — inače bi se gradio
@@ -130,7 +130,7 @@ jobs:
     needs: build-and-push
     environment: production        # vidi napomenu o Environments na dnu
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
