@@ -50,6 +50,8 @@ jobs:
 
     outputs:
       image-tag: ${{ steps.meta.outputs.version }}
+      # Malim slovima — vidi korak „Ime slike malim slovima" ispod.
+      image-name: ${{ steps.ime.outputs.slika }}
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +60,20 @@ jobs:
           # koji je pokrenuo CI mora eksplicitno navesti — inače bi se gradio
           # noviji kod od onog koji je testiran.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      # `github.repository` je „djuk1ca/UsluzionicaServer" — SA VELIKIM SLOVIMA,
+      # a Docker registri velika slova u imenu slike ne dozvoljavaju.
+      #
+      # `docker/metadata-action` to zna i sam spusti ime na mala slova, pa se
+      # slika objavljuje kao ghcr.io/djuk1ca/usluzionicaserver. Ali `deploy` job
+      # je referencu sklapao ručno iz `env.IMAGE_NAME`, pa bi Azure-u prosledio
+      # ghcr.io/djuk1ca/UsluzionicaServer:sha-XXXX — tag koji ne postoji.
+      # App Service bi ostao na staroj slici ili javio `manifest unknown`.
+      - name: Ime slike malim slovima
+        id: ime
+        run: echo "slika=${IME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IME: ${{ env.IMAGE_NAME }}
 
       - name: Prijava na GitHub Container Registry
         uses: docker/login-action@v3
@@ -172,6 +188,38 @@ jobs:
           AdminSeed__Email: "placeholder@usluzionica.rs"
           AdminSeed__Password: "Placeholder123!"
 
+      # ── BUĐENJE BAZE IZ AUTO-PAUSE STANJA ────────────────────────────────
+      #
+      # Baza je na besplatnoj ponudi (General Purpose Serverless), koja se posle
+      # ~1 h neaktivnosti AUTO-PAUZIRA. Prvi pokušaj konekcije je ne čeka nego
+      # odmah vraća SQL grešku 40613:
+      #   Database 'UsluzionicaDB' on server '...' is not currently available.
+      #   Please retry the connection later.
+      #
+      # Poruka zvuči kao kvar servera, a stanje je sasvim normalno — baza se
+      # budi, što traje 30-60 s. Ključno: TAJ neuspeli pokušaj je ono što
+      # buđenje pokreće. Zato ovde ide probni upit kome je dozvoljeno da padne,
+      # pa pauza dok se baza diže, pa tek onda prava migracija.
+      #
+      # Ako je baza već budna, probni upit prolazi i pauza se preskače.
+      - name: Pripremi probni upit
+        run: echo "SELECT 1;" > wake.sql
+
+      - name: Probudi bazu
+        id: wake
+        continue-on-error: true
+        uses: azure/sql-action@v2
+        with:
+          connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+          path: wake.sql
+
+      - name: Sačekaj da se baza podigne
+        if: steps.wake.outcome == 'failure'
+        run: |
+          echo "Probni upit nije prošao — baza je verovatno bila pauzirana."
+          echo "Čekam 120 s da se podigne, pa idu migracije."
+          sleep 120
+
       - name: Primeni migracije na Azure SQL
         uses: azure/sql-action@v2
         with:
@@ -216,7 +264,7 @@ jobs:
         with:
           app-name: ${{ vars.AZURE_WEBAPP_NAME }}
           # SHA tag, ne `latest` — deploy mora biti ponovljiv i vratljiv.
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}
+          images: ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:${{ needs.build-and-push.outputs.image-tag }}
 
       # ── SMOKE TEST ───────────────────────────────────────────────────────
       # Deploy koji je "uspeo" a aplikacija ne odgovara je i dalje neuspeh.
@@ -261,7 +309,7 @@ jobs:
           echo "az webapp config container set \\" >> $GITHUB_STEP_SUMMARY
           echo "  --name ${{ vars.AZURE_WEBAPP_NAME }} \\" >> $GITHUB_STEP_SUMMARY
           echo "  --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-PRETHODNI" >> $GITHUB_STEP_SUMMARY
+          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:sha-PRETHODNI" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
 # ═══════════════════════════════════════════════════════════════════════════
