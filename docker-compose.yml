@@ -28,9 +28,10 @@ services:
     restart: unless-stopped
 
   # ═══ KEŠ ════════════════════════════════════════════════════════════════════
-  # Redis JOŠ NIJE integrisan u aplikaciju — to je Faza B. Ovde je da compose
-  # bude kompletan i da vidiš kako servis izgleda. Trenutno se niko ne povezuje;
-  # kontejner samo stoji i troši ~10 MB.
+  # Aplikacija koristi Redis za pet stvari: keš objekata, SignalR backplane,
+  # Data Protection ključeve, distribuirane brave i praćenje prisutnosti.
+  # Sve fail-open — bez Redis-a aplikacija radi sporije, ne pokvareno.
+  # Vidi docs/scaling.md.
   cache:
     image: redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
@@ -80,7 +81,8 @@ services:
       # https://localhost:7176 (podrazumevano iz appsettings.json).
       App__BaseUrl: ${APP_BASE_URL}
 
-      # Priprema za Fazu B — aplikacija ovo još ne čita.
+      # Bez ove vrednosti aplikacija radi, ali bez keša, backplane-a i
+      # deljenih Data Protection ključeva — vidi docs/scaling.md.
       Redis__Connection: "cache:6379"
     ports:
       - "8080:8080"

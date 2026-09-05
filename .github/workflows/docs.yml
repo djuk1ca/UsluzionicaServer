@@ -1,0 +1,97 @@
+name: Docs
+
+# Builds the DocFX site and publishes it to GitHub Pages.
+#
+# The site is two things joined together:
+#   • docs/**            hand-written documentation (English)
+#   • apidoc/**          API reference generated from the XML comments in the
+#                        source by `docfx metadata` (Roslyn reads the project,
+#                        so no GenerateDocumentationFile is required)
+#
+# Only runs on main, and only when something that affects the site changed —
+# a docs typo should not rebuild the world, and a service refactor should
+# refresh the API reference.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'index.md'
+      - 'toc.yml'
+      - 'docfx.json'
+      - '.github/workflows/docs.yml'
+      # Source changes alter the generated API reference.
+      - '**/*.cs'
+      - 'UsluzionicaServer.csproj'
+  workflow_dispatch:
+
+# Pages deployment needs these three. Anything not listed becomes `none`
+# the moment `permissions:` appears at all.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one Pages deployment at a time. `cancel-in-progress: false` because
+# cancelling a half-finished deploy is worse than queueing behind it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Install DocFX
+        run: dotnet tool install --global docfx
+
+      # `docfx metadata` builds the project in memory through Roslyn, so the
+      # packages have to be on disk first. Restoring the .csproj rather than
+      # the .sln keeps the test projects out of it — they are not documented.
+      - name: Restore
+        run: dotnet restore UsluzionicaServer.csproj
+
+      - name: Build documentation site
+        run: docfx docfx.json --warningsAsErrors
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy to Pages
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ONE-TIME SETUP
+#
+# Settings → Pages → Build and deployment → Source: **GitHub Actions**
+# (not "Deploy from a branch" — that expects a gh-pages branch, which this
+#  workflow does not create).
+#
+# The site then appears at https://djuk1ca.github.io/UsluzionicaServer/
+# ═══════════════════════════════════════════════════════════════════════════

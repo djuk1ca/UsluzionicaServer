@@ -1,0 +1,64 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": ".",
+          "files": [ "UsluzionicaServer.csproj" ]
+        }
+      ],
+      "dest": "apidoc",
+      "outputFormat": "mref",
+      "memberLayout": "separatePages",
+      "properties": {
+        "TargetFramework": "net8.0",
+        "Configuration": "Release"
+      }
+    }
+  ],
+
+  "build": {
+    "content": [
+      {
+        "files": [ "index.md", "toc.yml" ]
+      },
+      {
+        "src": "docs",
+        "dest": "docs",
+        "files": [ "**/*.md", "**/toc.yml" ]
+      },
+      {
+        "src": "apidoc",
+        "dest": "apidoc",
+        "files": [ "**/*.yml", "**/*.md" ]
+      }
+    ],
+
+    "resource": [
+      {
+        "files": [ "docs/media/**" ]
+      }
+    ],
+
+    "output": "_site",
+    "template": [ "default", "modern" ],
+
+    "globalMetadata": {
+      "_appName": "Uslužionica API",
+      "_appTitle": "Uslužionica API",
+      "_description": "Backend documentation for the Uslužionica services marketplace.",
+      "_enableSearch": true,
+      "_disableContribution": false,
+      "_gitContribute": {
+        "repo": "https://github.com/djuk1ca/UsluzionicaServer",
+        "branch": "main"
+      },
+      "pdf": false
+    },
+
+    "markdownEngineName": "markdig",
+    "postProcessors": [ "ExtractSearchIndex" ]
+  }
+}

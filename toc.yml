@@ -1,0 +1,9 @@
+- name: Home
+  href: index.md
+
+- name: Documentation
+  href: docs/
+  homepage: docs/index.md
+
+- name: Code reference
+  href: apidoc/
