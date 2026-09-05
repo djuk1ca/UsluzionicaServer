@@ -208,15 +208,12 @@ public sealed class ProviderService(
         if (profile is null)
             return (null, "Provajder profil nije pronađen.");
 
-        var allowed = new[] { "image/jpeg", "image/png", "image/webp" };
-        if (!allowed.Contains(file.ContentType))
-            return (null, "Dozvoljeni formati: JPEG, PNG, WebP.");
+        // Format i ekstenzija se utvrđuju iz SADRŽAJA fajla. Ime i Content-Type
+        // koje je klijent poslao se ne koriste — vidi ImageUploads.
+        var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxImageBytes);
+        if (ext is null)
+            return (null, uploadError);
 
-        const long maxBytes = 10 * 1024 * 1024; // 10 MB
-        if (file.Length > maxBytes)
-            return (null, "Slika ne sme biti veća od 10 MB.");
-
-        var ext       = Path.GetExtension(file.FileName).ToLowerInvariant();
         var fileName  = $"cover_{profile.Id}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "covers");
         Directory.CreateDirectory(uploadDir);

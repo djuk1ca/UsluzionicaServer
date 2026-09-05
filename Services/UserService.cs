@@ -49,20 +49,16 @@ public sealed class UserService(
     public async Task<(string? Url, string? Error)> UploadAvatarAsync(
         string userId, IFormFile file)
     {
-        // Validacija fajla
-        var allowed = new[] { "image/jpeg", "image/png", "image/webp" };
-        if (!allowed.Contains(file.ContentType))
-            return (null, "Dozvoljeni formati: JPEG, PNG, WebP.");
-
-        const long maxBytes = 5 * 1024 * 1024; // 5 MB
-        if (file.Length > maxBytes)
-            return (null, "Slika ne sme biti veća od 5 MB.");
+        // Format i ekstenzija se utvrđuju iz SADRŽAJA fajla. Ime i Content-Type
+        // koje je klijent poslao se ne koriste — vidi ImageUploads.
+        var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxAvatarBytes);
+        if (ext is null)
+            return (null, uploadError);
 
         var user = await userManager.FindByIdAsync(userId);
         if (user is null) return (null, "Korisnik nije pronađen.");
 
         // Putanja: wwwroot/uploads/avatars/{userId}.{ext}
-        var ext       = Path.GetExtension(file.FileName).ToLowerInvariant();
         var fileName  = $"{userId}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "avatars");
         Directory.CreateDirectory(uploadDir);
