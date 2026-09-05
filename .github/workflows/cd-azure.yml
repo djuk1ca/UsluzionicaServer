@@ -50,6 +50,8 @@ jobs:
 
     outputs:
       image-tag: ${{ steps.meta.outputs.version }}
+      # Malim slovima — vidi korak „Ime slike malim slovima" ispod.
+      image-name: ${{ steps.ime.outputs.slika }}
 
     steps:
       - uses: actions/checkout@v4
@@ -58,6 +60,20 @@ jobs:
           # koji je pokrenuo CI mora eksplicitno navesti — inače bi se gradio
           # noviji kod od onog koji je testiran.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      # `github.repository` je „djuk1ca/UsluzionicaServer" — SA VELIKIM SLOVIMA,
+      # a Docker registri velika slova u imenu slike ne dozvoljavaju.
+      #
+      # `docker/metadata-action` to zna i sam spusti ime na mala slova, pa se
+      # slika objavljuje kao ghcr.io/djuk1ca/usluzionicaserver. Ali `deploy` job
+      # je referencu sklapao ručno iz `env.IMAGE_NAME`, pa bi Azure-u prosledio
+      # ghcr.io/djuk1ca/UsluzionicaServer:sha-XXXX — tag koji ne postoji.
+      # App Service bi ostao na staroj slici ili javio `manifest unknown`.
+      - name: Ime slike malim slovima
+        id: ime
+        run: echo "slika=${IME,,}" >> "$GITHUB_OUTPUT"
+        env:
+          IME: ${{ env.IMAGE_NAME }}
 
       - name: Prijava na GitHub Container Registry
         uses: docker/login-action@v3
@@ -128,8 +144,36 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Isti keš kao u CI-ju — ključ je identičan, pa ovaj job pogodi pakete
+      # koje je CI već preuzeo umesto da ih vuče iznova.
+      - name: Keširaj NuGet pakete
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      # OVAJ KORAK JE OBAVEZAN — njegov izostanak je oborio run #4.
+      #
+      # `dotnet ef` NE radi restore sam od sebe: pokreće build nad projektom i
+      # očekuje da `obj/project.assets.json` već postoji. Bez restore-a puca sa
+      #   error NETSDK1004: Assets file '.../obj/project.assets.json' not found.
+      #   Unable to retrieve project metadata. Ensure it's an SDK-style project.
+      #
+      # Druga poruka vodi na pogrešan trag — deluje kao da projekat nije
+      # SDK-style, a fali samo restore. CI ovo nikad nije uhvatio jer tamo
+      # `dotnet restore` stoji eksplicitno pre svakog build-a.
+      - name: Restore
+        run: dotnet restore UsluzionicaServer.csproj
+
+      # Verzija se PRIKUCAVA na 8.x namerno.
+      #
+      # Bez `--version` se povlači najnoviji EF alat — u run-u #4 je to bio
+      # 10.0.11, dok projekat koristi EF Core 8.0.4. Noviji alat nad starijim
+      # runtime-om obično radi, ali razilaženje glavnih verzija je nepotreban
+      # rizik u koraku koji dira produkcionu bazu.
       - name: Instaliraj EF alat
-        run: dotnet tool install --global dotnet-ef
+        run: dotnet tool install --global dotnet-ef --version 8.*
 
       - name: Generiši idempotentnu SQL skriptu
         run: >
@@ -149,6 +193,7 @@ jobs:
           AdminSeed__Email: "placeholder@usluzionica.rs"
           AdminSeed__Password: "Placeholder123!"
 
+<<<<<<< HEAD
       # Prijava je OVDE neophodna, iako ovaj job ne dira App Service.
       #
       # Azure SQL propušta samo IP adrese sa firewall liste, a GitHub runner
@@ -163,6 +208,39 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+=======
+      # ── BUĐENJE BAZE IZ AUTO-PAUSE STANJA ────────────────────────────────
+      #
+      # Baza je na besplatnoj ponudi (General Purpose Serverless), koja se posle
+      # ~1 h neaktivnosti AUTO-PAUZIRA. Prvi pokušaj konekcije je ne čeka nego
+      # odmah vraća SQL grešku 40613:
+      #   Database 'UsluzionicaDB' on server '...' is not currently available.
+      #   Please retry the connection later.
+      #
+      # Poruka zvuči kao kvar servera, a stanje je sasvim normalno — baza se
+      # budi, što traje 30-60 s. Ključno: TAJ neuspeli pokušaj je ono što
+      # buđenje pokreće. Zato ovde ide probni upit kome je dozvoljeno da padne,
+      # pa pauza dok se baza diže, pa tek onda prava migracija.
+      #
+      # Ako je baza već budna, probni upit prolazi i pauza se preskače.
+      - name: Pripremi probni upit
+        run: echo "SELECT 1;" > wake.sql
+
+      - name: Probudi bazu
+        id: wake
+        continue-on-error: true
+        uses: azure/sql-action@v2
+        with:
+          connection-string: ${{ secrets.AZURE_SQL_CONNECTION_STRING }}
+          path: wake.sql
+
+      - name: Sačekaj da se baza podigne
+        if: steps.wake.outcome == 'failure'
+        run: |
+          echo "Probni upit nije prošao — baza je verovatno bila pauzirana."
+          echo "Čekam 120 s da se podigne, pa idu migracije."
+          sleep 120
+>>>>>>> origin/main
 
       - name: Primeni migracije na Azure SQL
         uses: azure/sql-action@v2
@@ -208,7 +286,31 @@ jobs:
         with:
           app-name: ${{ vars.AZURE_WEBAPP_NAME }}
           # SHA tag, ne `latest` — deploy mora biti ponovljiv i vratljiv.
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-and-push.outputs.image-tag }}
+          images: ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:${{ needs.build-and-push.outputs.image-tag }}
+
+      # ── PRAVI HOSTNAME, NE POGOĐEN ───────────────────────────────────────
+      #
+      # Smoke test je do sada sklapao adresu kao
+      # https://<ime-app-servisa>.azurewebsites.net — što je nekad bilo tačno,
+      # ali Azure novije App Service-e pravi sa JEDINSTVENIM hostname-om oblika
+      #   <ime>-<hash>.<region>-01.azurewebsites.net
+      #
+      # `usluzionica-api.azurewebsites.net` zato uopšte ne postoji u DNS-u.
+      # curl je vraćao `000` (bez konekcije) svih 30 pokušaja, a /tmp/health.txt
+      # se nikad nije ni napravio — što izgleda kao da je aplikacija mrtva, a
+      # zapravo se kucalo na adresu koje nema.
+      #
+      # Umesto pogađanja, hostname se čita iz same Azure resurse.
+      - name: Očitaj hostname App Service-a
+        id: host
+        run: |
+          set -euo pipefail
+          HOST=$(az webapp show \
+            --name "${{ vars.AZURE_WEBAPP_NAME }}" \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --query defaultHostName -o tsv)
+          echo "Hostname: $HOST"
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
 
       # ── SMOKE TEST ───────────────────────────────────────────────────────
       # Deploy koji je "uspeo" a aplikacija ne odgovara je i dalje neuspeh.
@@ -220,15 +322,20 @@ jobs:
       - name: Smoke test /health
         run: |
           set -euo pipefail
-          URL="https://${{ vars.AZURE_WEBAPP_NAME }}.azurewebsites.net/health"
+          URL="https://${{ steps.host.outputs.host }}/health"
           echo "Čekam da $URL odgovori..."
 
           for i in $(seq 1 30); do
-            CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" --max-time 10 "$URL" || echo "000")
+            # `|| CODE="000"` a NE `|| echo "000"` unutar substitucije: curl i pri
+            # neuspehu ispiše "000" preko -w, pa su se dva niza spajala i log je
+            # prijavljivao besmislen "HTTP 000000".
+            CODE=$(curl -s -o /tmp/health.txt -w "%{http_code}" --max-time 10 "$URL") || CODE="000"
 
             if [[ "$CODE" == "200" ]]; then
               echo "Zdrav posle $((i*10)) s: $(cat /tmp/health.txt)"
               echo "### Deploy uspešan — /health vraća 200" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "$URL" >> $GITHUB_STEP_SUMMARY
               exit 0
             fi
 
@@ -253,7 +360,7 @@ jobs:
           echo "az webapp config container set \\" >> $GITHUB_STEP_SUMMARY
           echo "  --name ${{ vars.AZURE_WEBAPP_NAME }} \\" >> $GITHUB_STEP_SUMMARY
           echo "  --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-PRETHODNI" >> $GITHUB_STEP_SUMMARY
+          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:sha-PRETHODNI" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
 # ═══════════════════════════════════════════════════════════════════════════
