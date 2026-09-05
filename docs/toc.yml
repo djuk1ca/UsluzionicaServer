@@ -1,0 +1,52 @@
+- name: Overview
+  href: index.md
+
+- name: Foundations
+  items:
+    - name: Architecture
+      href: architecture.md
+    - name: Domain model
+      href: domain-model.md
+    - name: API reference
+      href: api-reference.md
+
+- name: Subsystems
+  items:
+    - name: Search engine
+      href: search.md
+    - name: Token economy
+      href: token-economy.md
+    - name: Real-time
+      href: realtime.md
+    - name: Scaling & caching
+      href: scaling.md
+
+- name: Operations
+  items:
+    - name: Security
+      href: security.md
+    - name: Testing
+      href: testing.md
+    - name: Deployment
+      href: deployment.md
+
+- name: Decisions
+  items:
+    - name: Overview
+      href: adr/README.md
+    - name: 0001 — No repository layer
+      href: adr/0001-no-repository-layer.md
+    - name: 0002 — SignalR for real-time
+      href: adr/0002-signalr-for-realtime.md
+    - name: 0003 — Denormalized search columns
+      href: adr/0003-denormalized-search-columns.md
+    - name: 0004 — Atomic token deduction
+      href: adr/0004-atomic-token-deduction.md
+    - name: 0005 — Redis fails open
+      href: adr/0005-redis-fail-open.md
+    - name: 0006 — Relative media URLs
+      href: adr/0006-relative-media-urls.md
+    - name: 0007 — Two-instalment referral
+      href: adr/0007-two-instalment-referral.md
+    - name: 0008 — Hetzner over Azure
+      href: adr/0008-hetzner-over-azure.md

@@ -113,6 +113,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-and-push
     environment: production        # vidi napomenu o Environments na dnu
+
+    permissions:
+      contents: read
+      id-token: write              # OIDC — vidi korak "Prijava na Azure" ispod
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -143,6 +148,21 @@ jobs:
           Encryption__MessageKey: "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
           AdminSeed__Email: "placeholder@usluzionica.rs"
           AdminSeed__Password: "Placeholder123!"
+
+      # Prijava je OVDE neophodna, iako ovaj job ne dira App Service.
+      #
+      # Azure SQL propušta samo IP adrese sa firewall liste, a GitHub runner
+      # dobija nasumičnu adresu pri svakom pokretanju — nemoguće je unapred je
+      # dodati. `azure/sql-action` ume da doda svoju adresu na listu pre upisa
+      # i skloni je posle, ali samo ako je sesija prijavljena.
+      #
+      # Alternativa bi bila trajno otvoriti bazu ka celom internetu. Nije opcija.
+      - name: Prijava na Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Primeni migracije na Azure SQL
         uses: azure/sql-action@v2

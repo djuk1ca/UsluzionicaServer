@@ -408,3 +408,6 @@ appsettings.*.Local.json
 !appsettings.Local.json.example
 .env
 !.env.example
+# DocFX generated output
+_site/
+apidoc/
