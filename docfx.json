@@ -14,7 +14,9 @@
       "memberLayout": "separatePages",
       "properties": {
         "TargetFramework": "net8.0",
-        "Configuration": "Release"
+        "Configuration": "Release",
+        "RunAnalyzers": "false",
+        "EnableNETAnalyzers": "false"
       }
     }
   ],

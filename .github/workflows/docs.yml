@@ -67,7 +67,16 @@ jobs:
         run: dotnet restore UsluzionicaServer.csproj
 
       - name: Build documentation site
-        run: docfx docfx.json --warningsAsErrors
+        # NAMERNO bez --warningsAsErrors.
+        #
+        # docfx metadata ucitava Razor analizatore (projekat je Sdk.Web), a
+        # DocFX-ova ugradjena Roslyn verzija zna biti starija od one koju
+        # analizator trazi:
+        #   warning: FailedToLoadAnalyzer ... ReferencesNewerCompiler
+        # To je sum iz toolchaina, ne problem u dokumentaciji, i ne sme da
+        # obori objavljivanje sajta. Pokretanje sa flagom lokalno i dalje ima
+        # smisla pre commita, da uhvati polomljene linkove.
+        run: docfx docfx.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
