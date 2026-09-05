@@ -47,4 +47,4 @@ The [code reference](xref:UsluzionicaServer.Services) is generated directly from
 
 [github.com/djuk1ca/UsluzionicaServer](https://github.com/djuk1ca/UsluzionicaServer)
 
-Copyright © 2026 Đukić. All rights reserved.
+Copyright © 2026 Đurađ Manojlović. All rights reserved.

@@ -227,4 +227,4 @@ Feature-complete backend for the pre-launch client. Production runs as a Docker 
 
 ## License
 
-Copyright © 2026 Đukić. All rights reserved. Source-available for review; not licensed for reuse or redistribution.
+Copyright © 2026 Đurađ Manojlović. All rights reserved. Source-available for review; not licensed for reuse or redistribution.
