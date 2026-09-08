@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Listings;
+using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Infrastructure.Search;
 using UsluzionicaServer.Persistence;
 
@@ -551,16 +552,13 @@ public sealed class ListingService(
         if (existingImages.Count >= 5)
             return (null, "Listing može imati maksimalno 5 slika.");
 
-        var allowed = new[] { "image/jpeg", "image/png", "image/webp" };
-        if (!allowed.Contains(file.ContentType))
-            return (null, "Dozvoljeni formati: JPEG, PNG, WebP.");
-
-        const long maxBytes = 10 * 1024 * 1024; // 10 MB
-        if (file.Length > maxBytes)
-            return (null, "Slika ne sme biti veća od 10 MB.");
+        // Format i ekstenzija se utvrđuju iz SADRŽAJA fajla. Ime i Content-Type
+        // koje je klijent poslao se ne koriste — vidi ImageUploads.
+        var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxImageBytes);
+        if (ext is null)
+            return (null, uploadError);
 
         // Putanja: wwwroot/uploads/listings/{listingId}/{guid}.{ext}
-        var ext       = Path.GetExtension(file.FileName).ToLowerInvariant();
         var fileName  = $"{Guid.NewGuid():N}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "listings", listingId.ToString());
         Directory.CreateDirectory(uploadDir);
