@@ -1,6 +1,6 @@
 # Testing
 
-207 tests, 82.5% line coverage, enforced as a build gate. Two suites with a deliberate split, and a strategy that departs from the usual pyramid for a reason worth explaining.
+227 tests, 83.4% line coverage, enforced as a build gate. Two suites with a deliberate split, and a strategy that departs from the usual pyramid for a reason worth explaining.
 
 > `tests/README.md` is the practical guide — how to run things, what Docker does, the traps. This page covers the strategy and how CI enforces it.
 
@@ -19,8 +19,8 @@ tests/
 
 | Suite | Tests | Needs Docker | Runtime |
 |---|---|---|---|
-| Unit | 58 methods | no | ~100 ms |
-| Integration | 87 methods | yes | 10–25 s warm, ~2 min cold |
+| Unit | 70 methods · 122 cases | no | ~100 ms |
+| Integration | 87 methods · 105 cases | yes | 10–25 s warm, ~2 min cold |
 
 The unit suite covers what is genuinely a pure unit: `SearchNormalizer`, `Fuzzy`, `MediaUrls`, `SecretsGuard`, `TokenService`, `MessageEncryption`.
 
@@ -174,10 +174,10 @@ flowchart TB
 
 ```
 Threshold:  75%
-Measured:   82.5% lines, 64.9% branches  (2026-08-26, 207 tests)
+Measured:   83.4% lines, 66.5% branches  (2026-09-08, 227 tests)
 ```
 
-The threshold is deliberately below the measured value. It is a brake, not a target: it exists to catch a **drop**, not to chase a number. The ~7 point margin absorbs normal variation when code lands slightly ahead of its tests.
+The threshold is deliberately below the measured value. It is a brake, not a target: it exists to catch a **drop**, not to chase a number. The ~8 point margin absorbs normal variation when code lands slightly ahead of its tests.
 
 `coverlet.runsettings` excludes EF migrations, generated code and `Program.cs`. Without those exclusions the number is inflated — a generated regex was sitting at 91% and dragging the total up on its own.
 

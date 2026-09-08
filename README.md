@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/ci.yml/badge.svg)](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/codeql.yml/badge.svg)](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/codeql.yml)
-[![Coverage](https://img.shields.io/badge/line%20coverage-82.5%25-brightgreen)](docs/testing.md)
+[![Coverage](https://img.shields.io/badge/line%20coverage-83.4%25-brightgreen)](docs/testing.md)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED)](docs/deployment.md)
 
@@ -28,7 +28,7 @@ The mobile client is a separate .NET MAUI Blazor Hybrid app; this repository is 
 | **2 SignalR hubs** | encrypted chat and push notifications over WebSockets |
 | **20 EF Core entities** | 10 migrations, SQL Server, 188 seeded service categories |
 | **4-tier search** | diacritic-, script- and typo-tolerant Serbian text search |
-| **207 tests** | 82.5% line coverage, gated in CI, real SQL Server via Testcontainers |
+| **227 tests** | 83.4% line coverage, gated in CI, real SQL Server via Testcontainers |
 | **2 deploy targets** | Hetzner (production) and Azure App Service, both fully automated |
 
 ---

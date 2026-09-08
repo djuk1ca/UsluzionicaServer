@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -477,7 +478,44 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseCors("Default");
-app.UseStaticFiles();
+
+// ── Statični fajlovi ───────────────────────────────────────────────────────
+// wwwroot sadrži isključivo otpremljene slike, dakle KORISNIČKI sadržaj koji se
+// servira sa našeg domena. Podrazumevani UseStaticFiles() bi ga posluživao sa
+// punom mapom tipova: fajl sa ekstenzijom .html bi otišao kao text/html, .svg
+// kao image/svg+xml — a oba smeju da nose skriptu, pa je to stored XSS na
+// domenu API-ja.
+//
+// Upload put to više ne dozvoljava (ImageUploads sam dodeljuje ekstenziju), ali
+// ovo je druga brana: čak i da fajl nekako dospe na disk, ovde se ne servira.
+//
+// ServeUnknownFileTypes ostaje false (podrazumevano) — sve van ove mape je 404.
+var uploadContentTypes = new FileExtensionContentTypeProvider(
+    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        [".jpg"]  = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".png"]  = "image/png",
+        [".webp"] = "image/webp"
+    });
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = uploadContentTypes,
+    OnPrepareResponse = ctx =>
+    {
+        var headers = ctx.Context.Response.Headers;
+
+        // Bez ovoga browser sme da "nanjuši" tip mimo deklarisanog i tretira
+        // sliku kao HTML ako sadržaj tako izgleda.
+        headers["X-Content-Type-Options"] = "nosniff";
+
+        // Slika nema šta da učitava ni izvršava. `sandbox` gasi skripte i za
+        // slučaj da nešto ipak bude servirano kao dokument.
+        headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+    }
+});
+
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();

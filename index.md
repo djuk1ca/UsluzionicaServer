@@ -36,7 +36,7 @@ ASP.NET Core 8 Web API with 77 REST endpoints, two SignalR hubs, EF Core against
 | **2 SignalR hubs** | encrypted chat and push notifications over WebSockets |
 | **20 EF Core entities** | 10 migrations, SQL Server, 188 seeded service categories |
 | **4-tier search** | diacritic-, script- and typo-tolerant Serbian text search |
-| **207 tests** | 82.5% line coverage, gated in CI, real SQL Server via Testcontainers |
+| **227 tests** | 83.4% line coverage, gated in CI, real SQL Server via Testcontainers |
 | **2 deploy targets** | Hetzner (production) and Azure App Service, both automated |
 
 ## Code reference

@@ -29,9 +29,9 @@ env:
 
   # Prag pokrivenosti linija.
   #
-  # IZMERENO 2026-08-26: 82.52% linija, 64.94% grana (207 testova).
+  # IZMERENO 2026-09-08: 83.4% linija, 66.5% grana (227 testova).
   # Prag je namerno NIŽI od izmerenog — nije cilj nego kočnica: postoji da bi se
-  # primetio PAD, ne da bi se jurio broj. ~7 poena rezerve pokriva normalno
+  # primetio PAD, ne da bi se jurio broj. ~8 poena rezerve pokriva normalno
   # kolebanje kad se doda kod koji još nema test.
   #
   # Meri se SAMO kod koji smo mi napisali — coverlet.runsettings isključuje

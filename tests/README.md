@@ -37,7 +37,7 @@ Ryuk diže sam Testcontainers; bez njega bi se posle svakog prekinutog run-a
 gomilali SQL Server kontejneri od po 2 GB.
 
 Tok: poveži se na Docker → digni Ryuk → digni SQL Server na **nasumičnom portu**
-→ čekaj dok `SELECT 1;` ne prođe → primeni 9 migracija + seed 188 kategorija →
+→ čekaj dok `SELECT 1;` ne prođe → primeni 10 migracija + seed 188 kategorija →
 pokreni testove → obriši kontejner.
 
 **Prvi run je spor** (~2 min, povlači se slika od 2.34 GB). Svaki sledeći
