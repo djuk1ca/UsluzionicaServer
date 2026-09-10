@@ -181,7 +181,6 @@ Two details worth calling out.
 | `ReferralService` | two-instalment referral rewards, idempotent |
 | `AdminService` | user and listing moderation, token log, stats, analytics |
 | `EmailService` | transactional email via MailKit, behind `IEmailService` |
-| `GeoService` | city lookup from IP, 3-second timeout, best-effort |
 
 All are `Scoped` except `MessageEncryption`, `OnlineTracker` and `CategorySearchIndex`, which are singletons.
 

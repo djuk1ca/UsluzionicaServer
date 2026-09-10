@@ -16,6 +16,16 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
     private readonly string _password = config["Email:Password"] ?? "";
     private readonly string _from     = config["Email:From"]     ?? "noreply@usluzionica.rs";
 
+    /// <summary>Ime koje se prikazuje u inboksu umesto gole adrese. „Uslužionica"
+    /// deluje znatno manje kao spam nego „noreply@usluzionica.rs", a verifikacioni
+    /// mejl je na kritičnom putu registracije.</summary>
+    private readonly string _fromName = config["Email:FromName"] ?? "Uslužionica";
+
+    /// <summary>Adresa na koju ide odgovor. Šalje se sa `noreply@`, ali ljudi
+    /// svejedno odgovaraju — bez ovoga takav odgovor odlazi u prazno. Prazna
+    /// vrednost znači da se Reply-To ne dodaje.</summary>
+    private readonly string? _replyTo = config["Email:ReplyTo"];
+
     // ── Javni API ──────────────────────────────────────────────────────────
 
     public Task SendVerificationEmailAsync(string toEmail, string fullName, string verifyUrl)
@@ -35,8 +45,12 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
     private async Task SendAsync(string to, string subject, string html)
     {
         var message = new MimeMessage();
-        message.From.Add(MailboxAddress.Parse(_from));
+        message.From.Add(new MailboxAddress(_fromName, _from));
         message.To.Add(MailboxAddress.Parse(to));
+
+        if (!string.IsNullOrWhiteSpace(_replyTo))
+            message.ReplyTo.Add(MailboxAddress.Parse(_replyTo));
+
         message.Subject = subject;
         message.Body    = new TextPart("html") { Text = html };
 

@@ -1,0 +1,81 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Reverse proxy ispred API-ja.
+#
+# ŠTA OVAJ FAJL REŠAVA
+#
+# API u kontejneru sluša na 8080, običnim HTTP-om, i vezan je za 127.0.0.1
+# (vidi docker-compose.prod.yml). Telefon očekuje https://api.usluzionica.rs
+# na portu 443, sa važećim sertifikatom. Između te dve tačke treba nešto što:
+#
+#   1. sluša na 443,
+#   2. pribavlja i OBNAVLJA TLS sertifikat (Let's Encrypt važi 90 dana),
+#   3. prosleđuje zahtev kontejneru.
+#
+# Caddy radi sva tri, i to sam — dovoljno je da domen bude naveden ispod i da
+# port 80 bude otvoren. Zbog toga je izabran umesto nginx-a, gde bi uz njega
+# išli i certbot i cron za obnavljanje.
+# ═══════════════════════════════════════════════════════════════════════════
+
+{
+	# Adresa na koju Let's Encrypt šalje upozorenje pred istek sertifikata,
+	# ako automatsko obnavljanje iz nekog razloga zakaže.
+	email {$ACME_EMAIL}
+}
+
+{$API_DOMAIN} {
+	# ── Sertifikat ─────────────────────────────────────────────────────────
+	# Ne piše se ništa: Caddy sam traži sertifikat od Let's Encrypt-a pri prvom
+	# pokretanju i obnavlja ga na ~60 dana. Zato je /data volumen OBAVEZAN —
+	# bez njega se pri svakom restartu traži nov, a Let's Encrypt dozvoljava
+	# 5 istih sertifikata nedeljno. Šesti restart znači nedelju dana bez HTTPS-a.
+
+	# ── Bezbednosna zaglavlja ──────────────────────────────────────────────
+	header {
+		# Godinu dana obaveznog HTTPS-a. Kad browser jednom ovo vidi, odbija
+		# da se na ovaj domen poveže preko HTTP-a čak i ako korisnik tako ukuca.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Bez ovoga browser sme da "nanjuši" tip sadržaja mimo deklarisanog.
+		X-Content-Type-Options "nosniff"
+
+		# API ne treba nikom u <iframe>-u.
+		X-Frame-Options "DENY"
+
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# Ne otkrivaj čime je serviran.
+		-Server
+	}
+
+	# ── SignalR ────────────────────────────────────────────────────────────
+	# Chat ide preko WebSocket-a. Caddy prosleđuje Upgrade zaglavlja sam, ali
+	# podrazumevani timeout od nekoliko sekundi bi rušio žive konekcije, pa se
+	# za /hubs ne postavlja gornja granica trajanja.
+	@hubs path /hubs/*
+	reverse_proxy @hubs api:8080 {
+		flush_interval -1
+	}
+
+	# ── Sve ostalo ─────────────────────────────────────────────────────────
+	# Ime `api` je ime servisa iz compose-a; Docker ga razrešava u internoj
+	# mreži. Port 8080 je onaj iz Dockerfile-a (ASPNETCORE_HTTP_PORTS).
+	reverse_proxy api:8080 {
+		# Caddy SAM postavlja X-Forwarded-For i X-Forwarded-Proto — to je ono
+		# što aplikacija zapravo čita kroz UseForwardedHeaders (Program.cs).
+		# Bez te dve strane bi svaki zahtev izgledao kao da dolazi sa adrese
+		# Caddy-ja, pa bi rate limiting brojao sve korisnike kao jednog.
+		#
+		# X-Real-IP nije obavezan, ali ga mnogi alati za analizu logova
+		# očekuju, a ništa ne košta.
+		header_up X-Real-IP {remote_host}
+	}
+
+	# ── Logovanje ──────────────────────────────────────────────────────────
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
