@@ -68,7 +68,7 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Inicijalizuj CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` je širi od podrazumevanog `security-extended`:
@@ -85,6 +85,6 @@ jobs:
           dotnet build UsluzionicaServer.sln --no-restore --configuration Release
 
       - name: Analiziraj
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: "/language:${{ matrix.language }}"
