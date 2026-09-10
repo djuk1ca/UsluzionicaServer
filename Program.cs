@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.StaticFiles;
@@ -236,17 +237,11 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["Redis:Connection"]))
 }
 
 // ── Application Services ──────────────────────────────────────────────────
-builder.Services.AddHttpClient("GeoApi", c =>
-{
-    c.Timeout = TimeSpan.FromSeconds(3);
-});
-
 // Scoped servisi
 builder.Services.AddScoped<TokenService>();
 // Registrovan kroz interfejs da bi testovi mogli da ubace implementaciju
 // koja hvata poruke umesto da šalje pravi SMTP.
 builder.Services.AddScoped<IEmailService, EmailService>();
-builder.Services.AddScoped<GeoService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
 builder.Services.AddScoped<CategoryService>();
@@ -467,6 +462,31 @@ using (var scope = app.Services.CreateScope())
 // ── Middleware pipeline ────────────────────────────────────────────────────
 // Exception handler je PRVI da bi uhvatio i greške iz ostalih middleware-a.
 app.UseMiddleware<ExceptionHandlingMiddleware>();
+
+// ── IZA REVERSE PROXY-JA ───────────────────────────────────────────────────
+// U produkciji ispred aplikacije stoji Caddy. Bez ovoga bi svaki zahtev izgledao
+// kao da dolazi sa IP adrese proxy-ja (172.x, Docker mreža), a ne od korisnika.
+//
+// Posledica bi bila tiha ali ozbiljna: rate limiting particioniše po
+// `RemoteIpAddress`, pa bi SVI korisnici sveta delili JEDNU kvotu od 5 prijava
+// u minuti. Peti čovek koji se tog minuta prijavljuje dobija 429. Isto tako bi
+// i bezbednosni log beležio adresu proxy-ja umesto napadačeve.
+//
+// Mora ići PRE UseHttpsRedirection i PRE UseRateLimiter — oba čitaju vrednosti
+// koje ovaj middleware postavlja.
+var forwardedHeaders = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+
+// Podrazumevano se veruje samo loopback-u, pa bi zaglavlja iz Docker mreže bila
+// odbačena. Brisanje liste znači "veruj svakom proxy-ju" — što je ovde bezbedno
+// SAMO zato što je API vezan za 127.0.0.1:8080 (vidi docker-compose.prod.yml),
+// pa niko osim Caddy-ja ne može ni da uspostavi vezu.
+forwardedHeaders.KnownNetworks.Clear();
+forwardedHeaders.KnownProxies.Clear();
+
+app.UseForwardedHeaders(forwardedHeaders);
 
 app.UseSerilogRequestLogging();
 

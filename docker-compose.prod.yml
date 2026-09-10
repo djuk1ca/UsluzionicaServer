@@ -12,6 +12,39 @@
 # izgradio i testirao idu u produkciju, bez ponovnog građenja.
 
 services:
+  # ═══ REVERSE PROXY ═════════════════════════════════════════════════════════
+  # Postoji SAMO u produkciji. Lokalno se API gađa direktno na localhost:8080,
+  # pa TLS i domen nemaju smisla.
+  #
+  # Ovo je jedini servis izložen internetu. Sve ostalo (api, db, cache) sluša
+  # na loopback-u ili samo na Docker mreži.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+      # HTTP/3 ide preko UDP-a. Nije obavezan, ali je besplatno ubrzanje na
+      # mobilnim mrežama, gde su gubici paketa česti.
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+
+      # OBAVEZAN. Ovde žive TLS sertifikati i ACME nalog. Bez njega se pri
+      # svakom restartu traži nov sertifikat, a Let's Encrypt dozvoljava
+      # 5 istih nedeljno — šesti restart ostavlja domen bez HTTPS-a.
+      - caddy-data:/data
+
+      - caddy-config:/config
+      - caddy-logs:/var/log/caddy
+    environment:
+      # Domen na koji Caddy traži sertifikat. Dolazi iz .env na serveru.
+      API_DOMAIN: ${API_DOMAIN}
+      # Let's Encrypt šalje upozorenje na ovu adresu ako obnavljanje zakaže.
+      ACME_EMAIL: ${ACME_EMAIL}
+    depends_on:
+      - api
+    restart: unless-stopped
+
   api:
     # ${IMAGE_TAG} upisuje CD workflow u .env pri svakom deployu.
     # Podrazumevano `latest` je samo da ručni `up` ne pukne ako .env fali —
@@ -32,16 +65,42 @@ services:
       App__BaseUrl: https://${API_DOMAIN}
       Cors__AllowedOrigins__0: https://${APP_DOMAIN}
 
-    ports:
-      # SAMO NA LOKALNOM INTERFEJSU.
+      # ── EMAIL ────────────────────────────────────────────────────────────
+      # OBAVEZNO u produkciji. `SecretsGuard.Validate` traži Email:Host i
+      # Email:Password kad je okruženje Production i obara start ako ih nema —
+      # kontejner bi ušao u restart petlju sa porukom o nedostajućoj
+      # konfiguraciji, a osnovni compose ove vrednosti uopšte ne prosleđuje.
       #
-      # U osnovnom fajlu stoji "8080:8080", što na serveru sa javnom IP adresom
-      # znači da je API dostupan svima na portu 8080 — zaobilazeći reverse proxy,
-      # dakle bez TLS-a i bez rate limita koje proxy radi.
-      #
-      # "127.0.0.1:8080:8080" ga vezuje za loopback: dohvatljiv je samo proxy-ju
-      # koji radi na istoj mašini.
-      - "127.0.0.1:8080:8080"
+      # Bez ispravnog SMTP-a niko ne može da potvrdi nalog ni da resetuje
+      # lozinku, pa ovo nije opciono ni funkcionalno, ne samo formalno.
+      Email__Host: ${EMAIL_HOST}
+      Email__Port: ${EMAIL_PORT:-587}
+      Email__Username: ${EMAIL_USERNAME}
+      Email__Password: ${EMAIL_PASSWORD}
+
+      # Šalje se sa noreply@, a odgovori idu na adresu podrške — vidi EmailService.
+      Email__From: ${EMAIL_FROM}
+      Email__FromName: ${EMAIL_FROM_NAME:-Uslužionica}
+      Email__ReplyTo: ${EMAIL_REPLY_TO}
+
+    # BEZ IJEDNOG PORTA NA HOSTU.
+    #
+    # Osnovni fajl mapira "8080:8080", što bi na serveru sa javnom IP adresom
+    # značilo da je API dostupan svima — zaobilazeći reverse proxy, dakle bez
+    # TLS-a. Zato se ovde briše u potpunosti.
+    #
+    # Caddy do API-ja NE dolazi preko host porta nego preko interne Docker
+    # mreže, po imenu servisa (`reverse_proxy api:8080` u Caddyfile-u). Host
+    # mapiranje bi služilo isključivo za `curl localhost:8080` pri dijagnostici
+    # sa samog servera — a to se radi i ovako, bez izlaganja porta:
+    #
+    #   docker compose ... exec api curl -s localhost:8080/health
+    #
+    # Praktičan razlog zašto je uklonjeno: Docker 29.x ume da zadrži rezervaciju
+    # na 127.0.0.1:8080 i posle neuspelog pokretanja, pa `up` puca sa
+    # "address already in use" iako `ss -tlnp` ne pokazuje nijednog slušaoca.
+    # Port koji nikom ne treba je port koji ne može da se sukobi.
+    ports: !reset []
 
   db:
     ports: !reset []
@@ -49,5 +108,43 @@ services:
     # 14330 radi lokalnog SSMS-a; na serveru se briše u potpunosti.
     # API joj i dalje pristupa preko Docker mreže po imenu `db`.
 
+    environment:
+      # ── EDICIJA ──────────────────────────────────────────────────────────
+      # Osnovni fajl koristi `Developer`, koja je besplatna ALI SAMO ZA RAZVOJ
+      # I TESTIRANJE — Microsoft je licencom izričito zabranjuje u produkciji.
+      #
+      # `Express` je besplatna i za produkciju. Ograničenja: baza do 10 GB,
+      # buffer pool do 1410 MB, 1 socket / 4 jezgra. Sve je daleko iznad naših
+      # potreba na launch-u, a 10 GB je isto ograničenje koje je plan i
+      # predvideo kad je biran ovaj pristup umesto PostgreSQL-a.
+      MSSQL_PID: Express
+
+      # ── MEMORIJA ─────────────────────────────────────────────────────────
+      # Server ima 4 GB, a SQL Server podrazumevano uzima koliko stigne.
+      # Kad Linuxu ponestane memorije, OOM killer ubija NAJVEĆI proces — a to
+      # je uvek SQL Server. Baza se ugasi usred rada, bez upozorenja u logu
+      # aplikacije; vidi se tek u `dmesg`.
+      #
+      # 1800 MB ostavlja ~2 GB za API, Redis, Caddy i sam OS.
+      MSSQL_MEMORY_LIMIT_MB: 1800
+
+    # Tvrda granica na nivou kontejnera, kao druga brana. Gornja vrednost
+    # ograničava ono što SQL Server sam sebi dodeljuje; ovo hvata i sve ostalo
+    # unutar kontejnera. Namerno je nešto veće, da granicu prvo pogodi SQL
+    # Server svojim mehanizmom, a ne Docker ubijanjem procesa.
+    mem_limit: 2200m
+
   cache:
     ports: !reset []
+
+    # Redis bez granice raste dok ima šta da kešira. Sve što drži je fail-open
+    # keš, pa je izbacivanje najstarijih ključeva ispravno ponašanje kad se
+    # napuni — ne gubi se ništa što se ne može ponovo izračunati.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 320m
+
+# Volumeni za Caddy. Osnovni fajl ih nema jer Caddy tamo i ne postoji.
+volumes:
+  caddy-data:      # sertifikati i ACME nalog — NE brisati, vidi komentar gore
+  caddy-config:
+  caddy-logs:

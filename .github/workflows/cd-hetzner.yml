@@ -115,10 +115,17 @@ jobs:
             set -euo pipefail
             cd /opt/usluzionica
 
-            # Prijava na GHCR. GITHUB_TOKEN ne važi van runnera, pa je ovde
-            # potreban Personal Access Token sa `read:packages` opsegom.
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
-              -u ${{ github.actor }} --password-stdin
+            # Prijava na GHCR samo ako je token postavljen.
+            #
+            # Paket `usluzionicaserver` je JAVAN, pa se povlači anonimno i login
+            # nije potreban — jedan secret manje za pravljenje i rotiranje.
+            # Uslov postoji da bi isti workflow radio i ako paket ikad postane
+            # privatan: tada se doda GHCR_TOKEN (PAT sa `read:packages`) i
+            # prijava se uključuje sama, bez izmene koda.
+            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
+                -u ${{ github.actor }} --password-stdin
+            fi
 
             # Tag koji se deployuje upisujemo u .env; compose ga čita kao
             # ${IMAGE_TAG}. Tako server uvek zna TAČNO koja verzija se vrti,
@@ -131,9 +138,19 @@ jobs:
             docker compose -f docker-compose.yml -f docker-compose.prod.yml pull api
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api
 
-            # Slike se gomilaju posle svakog deploya i pojedu disk.
-            # `-f` bez `-a` briše samo one koje nijedan kontejner ne koristi.
-            docker image prune -f
+            # ── ČIŠĆENJE STARIH SLIKA ────────────────────────────────────
+            # Svaki deploy povlači novu `sha-` sliku od ~390 MB, a stare ostaju.
+            # Na disku od 40 GB to se primeti za par meseci.
+            #
+            # `prune -f` BEZ `-a` briše samo *dangling* slike — one koje su
+            # ostale bez taga. Naše stare verzije taj tag imaju (`sha-a1b2c3d`),
+            # pa ih taj oblik komande uopšte ne dira. Otud `-a`.
+            #
+            # `until=168h` čuva sve iz poslednjih 7 dana, pa nekoliko prethodnih
+            # verzija ostaje na disku za brz rollback bez ponovnog povlačenja.
+            # Slike koje trenutno koristi neki kontejner se ne brišu bez obzira
+            # na starost, pa su `mssql`, `redis` i `caddy` bezbedni.
+            docker image prune -af --filter "until=168h"
 
       # ── SMOKE TEST ───────────────────────────────────────────────────────
       # Ide sa runnera preko interneta, dakle proverava i da su DNS, reverse

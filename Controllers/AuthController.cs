@@ -43,7 +43,7 @@ public sealed class AuthController(
     // ── POST /api/auth/login ───────────────────────────────────────────────
     /// <summary>
     /// Prijavljuje korisnika. Vraća JWT access token (60 min) i refresh token (30 dana).
-    /// IP adresa se koristi za ažuriranje LastKnownCity.
+    /// IP adresa se koristi samo za bezbednosni log, ne šalje se nikome.
     /// </summary>
     [HttpPost("login")]
     [EnableRateLimiting("auth")]

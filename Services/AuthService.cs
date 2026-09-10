@@ -11,7 +11,6 @@ public sealed class AuthService(
     AppDbContext                 db,
     IEmailService                emailService,
     TokenService                 tokenService,
-    GeoService                   geoService,
     ReferralService              referralService,
     IConfiguration               config,
     ILogger<AuthService>         logger)
@@ -31,11 +30,12 @@ public sealed class AuthService(
         // 3. Kreiraj korisnika
         var user = new ApplicationUser
         {
-            UserName     = req.Email,
-            Email        = req.Email,
-            FullName     = req.FullName.Trim(),
-            ReferralCode = referralCode,
-            IsActive     = true
+            UserName      = req.Email,
+            Email         = req.Email,
+            FullName      = req.FullName.Trim(),
+            LastKnownCity = string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim(),
+            ReferralCode  = referralCode,
+            IsActive      = true
         };
         
         var result = await userManager.CreateAsync(user, req.Password);
@@ -132,16 +132,24 @@ public sealed class AuthService(
         if (!user.EmailConfirmed)
             return (null, "Email adresa nije potvrđena. Proveri inbox i klikni verifikacioni link.");
 
-        // 4. IP geolokacija → ažuriraj LastKnownCity (ne blokira login ako padne)
-        var city = await geoService.GetCityAsync(ipAddress);
-        if (city is not null)
-            user.LastKnownCity = city;
+        // Grad se NE izvodi iz IP adrese.
+        //
+        // Ranije je ovde stajao poziv ka spoljnom servisu (ip-api.com) koji je na
+        // svakom loginu prepisivao LastKnownCity. Uklonjeno iz tri razloga:
+        //
+        //   1. Slao je IP adresu korisnika trećoj strani, i to preko običnog HTTP-a.
+        //   2. Kod mobilnih operatera saobraćaj izlazi kroz nekoliko centralnih
+        //      tačaka, pa je pogodak najčešće bio pogrešan grad.
+        //   3. Taj pogrešan pogodak je TIHO PREPISIVAO grad koji je korisnik sam
+        //      izabrao — izričit unos je gubio od nagađanja.
+        //
+        // Grad sada bira korisnik: pri registraciji, i kasnije u profilu.
 
-        // 5. Generiši JWT access token
+        // 4. Generiši JWT access token
         var roles       = await userManager.GetRolesAsync(user);
         var accessToken = tokenService.GenerateAccessToken(user, roles);
 
-        // 6. Generiši refresh token i snimi ga u bazu
+        // 5. Generiši refresh token i snimi ga u bazu
         //    Stari aktivni refresh tokeni ostaju (podržavamo više uređaja)
         var refreshTokenValue = TokenService.GenerateRefreshToken();
         var refreshExpDays    = int.Parse(config["Jwt:RefreshTokenExpirationDays"] ?? "30");
@@ -155,8 +163,9 @@ public sealed class AuthService(
 
         await db.SaveChangesAsync();
 
-        logger.LogInformation("Korisnik se prijavio: {Email} | IP: {IP} | Grad: {City}",
-            req.Email, ipAddress, city ?? "nepoznat");
+        // IP ostaje u logu radi praćenja sumnjivih prijava — ne šalje se nikome.
+        logger.LogInformation("Korisnik se prijavio: {Email} | IP: {IP}",
+            req.Email, ipAddress);
 
         return (new AuthResponse
         {
