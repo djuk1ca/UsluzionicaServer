@@ -34,7 +34,12 @@ public class AuthFlowTests(DatabaseFixture fixture) : IntegrationTestBase(fixtur
         {
             fullName = "Novi Korisnik",
             email,
-            password = lozinka
+            password = lozinka,
+
+            // Bez ovoga server odbija registraciju. Ova dva testa su i pala kad
+            // je pravilo uvedeno — što je tačno ono što treba da se desi kad se
+            // promeni HTTP ugovor. Samo pravilo se testira u PolicyConsentTests.
+            acceptedPolicy = true
         });
 
         register.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -108,7 +113,8 @@ public class AuthFlowTests(DatabaseFixture fixture) : IntegrationTestBase(fixtur
 
         await client.PostAsJsonAsync("/api/auth/register", new
         {
-            fullName = "Nepotvrđeni", email, password = "MojaLoz123!"
+            fullName = "Nepotvrđeni", email, password = "MojaLoz123!",
+            acceptedPolicy = true
         });
 
         var login = await client.PostAsJsonAsync("/api/auth/login", new
