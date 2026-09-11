@@ -14,6 +14,21 @@ public class ApplicationUser : IdentityUser
     public bool            IsActive        { get; set; } = true;
     public string?         ReferralCode    { get; set; }   // 8-char unique, generisan pri registraciji
 
+    // ── Saglasnost sa politikom privatnosti ────────────────────────────────
+    // ZZPL (i GDPR čl. 7) traže da rukovalac MOŽE DA DOKAŽE saglasnost.
+    // Čekiran box koji nigde ne ostavlja trag to ne dokazuje.
+    //
+    // Verzija se čuva odvojeno od datuma iz praktičnog razloga: kad se politika
+    // izmeni, bez nje ne postoji način da se utvrdi ko je prihvatio koju — pa bi
+    // nova saglasnost morala da se traži od SVIH umesto samo od onih na staroj.
+    //
+    // Nullable jer nalozi napravljeni pre ove izmene nemaju zapis. Null znači
+    // „ne znamo", što je iskrenije od izmišljenog datuma.
+    public DateTime?       PolicyAcceptedAt      { get; set; }
+
+    /// <summary>Oznaka verzije politike, npr. „2026-09". Vidi <see cref="Infrastructure.PolicyVersion"/>.</summary>
+    public string?         PolicyVersionAccepted { get; set; }
+
     // ── Denormalizovani indeks za pretragu ─────────────────────────────────
     // Održava AppDbContext.SaveChanges kroz SearchIndexer. Koristi ga admin
     // pretraga korisnika, da "milos" nađe i "Miloš".

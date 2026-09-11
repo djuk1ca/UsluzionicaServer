@@ -12,4 +12,13 @@ public sealed class RegisterRequest
     public string? City         { get; set; }
 
     public string? ReferralCode { get; set; }  // opcionalno — kad klikne referral link
+
+    /// <summary>
+    /// Korisnik je prihvatio politiku privatnosti.
+    ///
+    /// Postoji provera i na klijentu (dugme je onemogućeno dok box nije čekiran),
+    /// ali to je pogodnost za korisnika, ne kapija — HTTP zahtev se može poslati
+    /// i mimo aplikacije. Zato se odbijanje radi i ovde.
+    /// </summary>
+    public bool AcceptedPolicy { get; set; }
 }

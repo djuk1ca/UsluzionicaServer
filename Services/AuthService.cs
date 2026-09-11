@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.DTOs.Auth;
+using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
@@ -18,6 +19,12 @@ public sealed class AuthService(
     // ── REGISTER ───────────────────────────────────────────────────────────
     public async Task<(bool Success, string[] Errors)> RegisterAsync(RegisterRequest req)
     {
+        // 0. Saglasnost sa politikom privatnosti je preduslov za nalog.
+        //    Klijent već onemogućava dugme, ali to je pogodnost za korisnika —
+        //    zahtev se može poslati i mimo aplikacije, pa kapija mora biti ovde.
+        if (!req.AcceptedPolicy)
+            return (false, ["Morate prihvatiti politiku privatnosti."]);
+
         // 1. Proveri da email nije zauzet (Identity to radi interno, ali dajemo jasniju grešku)
         if (await userManager.FindByEmailAsync(req.Email) is not null)
             return (false, ["Email je već registrovan."]);
@@ -35,7 +42,13 @@ public sealed class AuthService(
             FullName      = req.FullName.Trim(),
             LastKnownCity = string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim(),
             ReferralCode  = referralCode,
-            IsActive      = true
+            IsActive      = true,
+
+            // Trenutak i verzija saglasnosti. Bez verzije se posle izmene
+            // politike ne može utvrditi ko je prihvatio koju, pa bi se nova
+            // saglasnost morala tražiti od svih.
+            PolicyAcceptedAt      = DateTime.UtcNow,
+            PolicyVersionAccepted = PolicyVersion.Current
         };
         
         var result = await userManager.CreateAsync(user, req.Password);

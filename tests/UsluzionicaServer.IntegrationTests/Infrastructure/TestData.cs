@@ -64,7 +64,11 @@ public sealed class TestData(UsluzionicaWebFactory factory)
             FullName     = fullName,
             Email        = email,
             Password     = DefaultPassword,
-            ReferralCode = referralCode
+            ReferralCode = referralCode,
+
+            // Bez ovoga RegisterAsync odbija zahtev. Priprema podataka uvek
+            // pristaje — pravilo se testira zasebno, u PolicyConsentTests.
+            AcceptedPolicy = true
         });
 
         if (!ok)
