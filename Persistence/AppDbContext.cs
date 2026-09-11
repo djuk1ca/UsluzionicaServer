@@ -79,6 +79,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(u => u.ProfileImageUrl).HasMaxLength(500);
             e.Property(u => u.LastKnownCity).HasMaxLength(100);
             e.Property(u => u.ReferralCode).HasMaxLength(20);
+
+            // "2026-09" — 16 je sa viškom dovoljno, a sprečava nvarchar(max)
+            // koji EF podrazumeva za string bez dužine.
+            e.Property(u => u.PolicyVersionAccepted).HasMaxLength(16);
             e.HasIndex(u => u.ReferralCode).IsUnique();
             e.Property(u => u.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
 
