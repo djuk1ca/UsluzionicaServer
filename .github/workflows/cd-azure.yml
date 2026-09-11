@@ -193,7 +193,6 @@ jobs:
           AdminSeed__Email: "placeholder@usluzionica.rs"
           AdminSeed__Password: "Placeholder123!"
 
-<<<<<<< HEAD
       # Prijava je OVDE neophodna, iako ovaj job ne dira App Service.
       #
       # Azure SQL propušta samo IP adrese sa firewall liste, a GitHub runner
@@ -208,8 +207,13 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-=======
+
       # ── BUĐENJE BAZE IZ AUTO-PAUSE STANJA ────────────────────────────────
+      #
+      # IDE POSLE PRIJAVE, i redosled je bitan: probni upit ispod ide kroz
+      # `azure/sql-action`, koji IP runnera dodaje na firewall samo ako je
+      # sesija prijavljena. Bez prijave bi probni upit padao na firewall-u,
+      # a ne zato što je baza pauzirana — pa bi se uvek čekalo punih 120 s.
       #
       # Baza je na besplatnoj ponudi (General Purpose Serverless), koja se posle
       # ~1 h neaktivnosti AUTO-PAUZIRA. Prvi pokušaj konekcije je ne čeka nego
@@ -240,7 +244,6 @@ jobs:
           echo "Probni upit nije prošao — baza je verovatno bila pauzirana."
           echo "Čekam 120 s da se podigne, pa idu migracije."
           sleep 120
->>>>>>> origin/main
 
       - name: Primeni migracije na Azure SQL
         uses: azure/sql-action@v2
