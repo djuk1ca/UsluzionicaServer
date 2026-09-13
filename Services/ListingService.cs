@@ -83,7 +83,12 @@ public sealed class ListingService(
         return await ScoredSearchAsync(baseQuery, tier1b, query, categoryMatches, p);
     }
 
-    // ── Osnovni filteri (status, kategorija, grad) ─────────────────────────
+    // ── Osnovni filteri (status, vlasnik, blokade, kategorija, grad) ───────
+    //
+    // JEDINO MESTO kroz koje prolaze sva četiri sloja pretrage — svaki sloj
+    // nadograđuje ovaj upit. Zato filter koji mora da važi uvek ide ovde, a ne
+    // po slojevima: propušten u jednom sloju, procurio bi tek na određenim
+    // upitima i teško bi se primetio.
     private async Task<IQueryable<Listing>> BuildBaseQueryAsync(ListingQueryParams p)
     {
         var query = db.Listings
@@ -92,7 +97,18 @@ public sealed class ListingService(
             .Include(l => l.Images)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
-            .Where(l => l.Status == ListingStatus.Active);
+            .Where(l => l.Status == ListingStatus.Active)
+            // Oglasi deaktiviranih naloga NE SMEJU u rezultate.
+            //
+            // Ranije je ovde stajao samo uslov o statusu oglasa. IsActive se
+            // proveravao isključivo pri prijavi i osvežavanju tokena, pa je
+            // banovan korisnik gubio pristup — a njegovi oglasi su i dalje
+            // stajali u pretrazi. Sadržaj zbog kog je nalog ugašen ostajao je
+            // na ekranu, što je gore nego da nismo reagovali.
+            .Where(l => l.ProviderProfile.User.IsActive);
+
+        // Blokirani, u oba smera.
+        query = BlockService.FilterBlocked(query, db, p.ViewerUserId);
 
         // Filter po kategoriji (slug) — roditelj povlači i podkategorije.
         if (!string.IsNullOrWhiteSpace(p.CategorySlug))
@@ -389,6 +405,31 @@ public sealed class ListingService(
             .FirstOrDefaultAsync(l => l.Id == id && l.Status != ListingStatus.Archived);
 
         if (listing is null) return null;
+
+        // Deaktiviran vlasnik — oglas se ponaša kao da ne postoji.
+        //
+        // Vlasnik i dalje sme da vidi svoj oglas: bez toga ne bi znao šta mu se
+        // desilo sa sadržajem niti mogao da ga ispravi.
+        if (!listing.ProviderProfile.User.IsActive &&
+            viewerUserId != listing.ProviderProfile.UserId)
+            return null;
+
+        // Blokada u bilo kom smeru — isto, 404 umesto sadržaja.
+        //
+        // Direktan link na oglas mora da bude zatvoren kao i pretraga. Inače
+        // blokada znači samo „ne vidim te u listi", a link iz starog razgovora
+        // i dalje radi.
+        if (viewerUserId is not null &&
+            viewerUserId != listing.ProviderProfile.UserId)
+        {
+            var vlasnikId = listing.ProviderProfile.UserId;
+
+            var blokirano = await db.UserBlocks.AnyAsync(ub =>
+                (ub.BlockerId == viewerUserId && ub.BlockedId == vlasnikId) ||
+                (ub.BlockerId == vlasnikId    && ub.BlockedId == viewerUserId));
+
+            if (blokirano) return null;
+        }
 
         // Ne broj svoje preglede (vlasnik koji otvara svoj oglas)
         if (viewerUserId != listing.ProviderProfile.UserId)

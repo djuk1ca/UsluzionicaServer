@@ -16,6 +16,7 @@ public sealed class TokenWalletService(
     AppDbContext db,
     IConfiguration config,
     NotificationService notificationService,
+    BlockService blockService,
     ILogger<TokenWalletService> logger)
 {
     // ── WALLET ─────────────────────────────────────────────────────────────
@@ -81,6 +82,13 @@ public sealed class TokenWalletService(
     {
         if (dto.ReceiverId == senderId)
             return (null, "Ne možete slati ponudu samome sebi.");
+
+        // Blokada zatvara i ponudu popusta.
+        //
+        // Ponuda stiže primaocu kao notifikacija sa iznosom, pa bi bez ove
+        // provere bila još jedan kanal kojim blokirani dopire do sagovornika.
+        if (await blockService.JeBlokiranoAsync(senderId, dto.ReceiverId))
+            return (null, "Slanje ponude ovom korisniku nije moguće.");
 
         // Osnovna provera balansa (nije atomična — precizna provera je pri accept)
         var sender = await db.Users.FindAsync(senderId);

@@ -13,5 +13,19 @@ public enum NotificationKind
     DiscountOfferReceived,
     DiscountOfferAccepted,
     DiscountOfferRejected,
-    ReferralRewarded
+    ReferralRewarded,
+
+    // ── Moderacija ─────────────────────────────────────────────────────────
+    // Dodato NA KRAJ namerno — nove vrednosti između postojećih pomerile bi
+    // značenje već upisanih redova ako se enum čuva kao int.
+    //
+    // Obe se šalju TEK KAD je odluka doneta, nikad na samu prijavu.
+    // Obaveštenje „neko te je prijavio" vodi u osvetu između korisnika i uči
+    // zloupotrebljivače šta je zapaženo pre nego što iko stigne da pregleda.
+
+    /// <summary>Oglas uklonjen posle prijave. Vlasnik mora da zna i zašto.</summary>
+    ListingRemoved,
+
+    /// <summary>Nalog deaktiviran zbog kršenja uslova korišćenja.</summary>
+    AccountDeactivated
 }

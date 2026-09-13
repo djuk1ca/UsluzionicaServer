@@ -17,6 +17,7 @@ namespace UsluzionicaServer.Services;
 public sealed class ReviewService(
     AppDbContext            db,
     NotificationService     notificationService,
+    BlockService            blockService,
     ILogger<ReviewService>  logger)
 {
     // ── CREATE ─────────────────────────────────────────────────────────────
@@ -40,6 +41,14 @@ public sealed class ReviewService(
         // Autor ne može oceniti sopstveni listing
         if (listing.ProviderProfile.UserId == authorId)
             return (null, "Ne možete ostaviti recenziju na sopstvenom oglasu.");
+
+        // Blokada zatvara i pisanje recenzije.
+        //
+        // Bez ove provere recenzija bi ostala jedini kanal kojim blokirani i
+        // dalje dopire do onoga ko ga je blokirao — i to javno, na njegovom
+        // oglasu, sa ocenom koja mu obara prosek.
+        if (await blockService.JeBlokiranoAsync(authorId, listing.ProviderProfile.UserId))
+            return (null, "Recenzija za ovaj oglas nije moguća.");
 
         // Validacija BookingRequestId — opciono ali strogo ako je dato
         if (dto.BookingRequestId.HasValue)
@@ -108,15 +117,30 @@ public sealed class ReviewService(
     /// Sve recenzije jednog oglasa, sortirane od najnovije.
     /// Javni endpoint — ne zahteva autentifikaciju.
     /// </summary>
-    public async Task<List<ReviewDto>> GetByListingAsync(int listingId, int page, int pageSize)
+    public async Task<List<ReviewDto>> GetByListingAsync(
+        int listingId, int page, int pageSize, string? viewerUserId = null)
     {
         pageSize = Math.Clamp(pageSize, 1, 50);
 
-        return await db.Reviews
+        var query = db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
             .Include(r => r.Listing)
-            .Where(r => r.ListingId == listingId)
+            .Where(r => r.ListingId == listingId);
+
+        // Recenzije blokiranih se sklanjaju gledaocu.
+        //
+        // Filtrira se po AUTORU recenzije, ne po vlasniku oglasa: sadržaj koji
+        // je ovde sporan napisao je autor. Vlasnika pokriva provera nad samim
+        // oglasom, koja se dešava pre nego što se do recenzija uopšte stigne.
+        if (!string.IsNullOrEmpty(viewerUserId))
+        {
+            query = query.Where(r => !db.UserBlocks.Any(ub =>
+                (ub.BlockerId == viewerUserId && ub.BlockedId == r.AuthorId) ||
+                (ub.BlockedId == viewerUserId && ub.BlockerId == r.AuthorId)));
+        }
+
+        return await query
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
@@ -141,15 +165,26 @@ public sealed class ReviewService(
     /// Sve recenzije svih oglasa jednog providera, sortirane od najnovije.
     /// Javni endpoint.
     /// </summary>
-    public async Task<List<ReviewDto>> GetByProviderAsync(int providerProfileId, int page, int pageSize)
+    public async Task<List<ReviewDto>> GetByProviderAsync(
+        int providerProfileId, int page, int pageSize, string? viewerUserId = null)
     {
         pageSize = Math.Clamp(pageSize, 1, 50);
 
-        return await db.Reviews
+        var query = db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
             .Include(r => r.Listing)
-            .Where(r => r.Listing.ProviderProfileId == providerProfileId)
+            .Where(r => r.Listing.ProviderProfileId == providerProfileId);
+
+        // Isto pravilo kao u GetByListingAsync — filtrira se po autoru recenzije.
+        if (!string.IsNullOrEmpty(viewerUserId))
+        {
+            query = query.Where(r => !db.UserBlocks.Any(ub =>
+                (ub.BlockerId == viewerUserId && ub.BlockedId == r.AuthorId) ||
+                (ub.BlockedId == viewerUserId && ub.BlockerId == r.AuthorId)));
+        }
+
+        return await query
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)

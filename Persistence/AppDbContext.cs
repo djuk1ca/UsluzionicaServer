@@ -28,6 +28,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Notification>        Notifications        => Set<Notification>();
     public DbSet<FavoriteListing>     FavoriteListings     => Set<FavoriteListing>();
     public DbSet<FavoriteProvider>    FavoriteProviders    => Set<FavoriteProvider>();
+    public DbSet<Report>              Reports              => Set<Report>();
+    public DbSet<UserBlock>           UserBlocks           => Set<UserBlock>();
 
     // ── Održavanje indeksa za pretragu ─────────────────────────────────────
     // Presreće SVAKI upis i osvežava Search* kolone pre nego što odu u bazu.
@@ -656,5 +658,91 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
              .HasForeignKey(f => f.ProviderProfileId)
              .OnDelete(DeleteBehavior.NoAction);  // SQL Server: nema višestruke cascade putanje
         });
+
+        // ── Report ─────────────────────────────────────────────────────────
+        builder.Entity<Report>(e =>
+        {
+            // Svi enumi kao string, po uzoru na Referral.Status i Listing.Status:
+            // ubacivanje nove vrednosti u sredinu enuma tada ne pomera značenje
+            // postojećih redova.
+            e.Property(r => r.TargetType).HasConversion<string>().HasMaxLength(16);
+            e.Property(r => r.Reason)    .HasConversion<string>().HasMaxLength(32);
+            e.Property(r => r.Status)    .HasConversion<string>().HasMaxLength(16);
+
+            e.Property(r => r.Note)          .HasMaxLength(500);
+            e.Property(r => r.ResolutionNote).HasMaxLength(500);
+
+            // Tačno jedna meta. Bez ovoga je moguća prijava ni o čemu (obe NULL)
+            // ili prijava o dve stvari (obe popunjene) — koju onda admin ne može
+            // da reši, jer ne zna šta uklanja.
+            e.ToTable(t => t.HasCheckConstraint(
+                "CK_Report_JednaMeta",
+                "([ListingId] IS NULL) <> ([ReportedUserId] IS NULL)"));
+
+            // Jedan korisnik ne može dvaput prijaviti istu metu DOK PRVA ČEKA.
+            // Filtrirani indeks, a ne običan: posle rešavanja sme ponovo, jer se
+            // prekršaj može ponoviti na istom oglasu.
+            e.HasIndex(r => new { r.ReporterId, r.ListingId })
+             .HasFilter("[Status] = 'Pending' AND [ListingId] IS NOT NULL")
+             .IsUnique();
+
+            e.HasIndex(r => new { r.ReporterId, r.ReportedUserId })
+             .HasFilter("[Status] = 'Pending' AND [ReportedUserId] IS NOT NULL")
+             .IsUnique();
+
+            // Red za admina: filtrira po Status, sortira po CreatedAt.
+            e.HasIndex(r => new { r.Status, r.CreatedAt });
+
+            // SVE VEZE SU Restrict, iz dva nezavisna razloga.
+            //
+            // 1. Prijava mora da preživi uklanjanje mete — to je revizijski trag,
+            //    i jedini dokaz zašto je nešto uklonjeno.
+            // 2. SQL Server ne dozvoljava više kaskadnih putanja ka istoj tabeli,
+            //    a ovde tri FK-a gađaju AspNetUsers. Isti razlog zbog kog
+            //    Conversation ima User1/User2 bez kaskade.
+            e.HasOne(r => r.Reporter)
+             .WithMany().HasForeignKey(r => r.ReporterId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(r => r.Listing)
+             .WithMany().HasForeignKey(r => r.ListingId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(r => r.ReportedUser)
+             .WithMany().HasForeignKey(r => r.ReportedUserId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(r => r.ResolvedBy)
+             .WithMany().HasForeignKey(r => r.ResolvedById)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── UserBlock ──────────────────────────────────────────────────────
+        builder.Entity<UserBlock>(e =>
+        {
+            e.HasIndex(x => new { x.BlockerId, x.BlockedId }).IsUnique();
+
+            // DRUGI indeks, obrnutim redosledom kolona, NIJE suvišan.
+            //
+            // Blokada važi simetrično, pa svaka provera pita i „koga sam ja
+            // blokirao" i „ko je mene blokirao". Prvi indeks pokriva samo prvo
+            // pitanje. Bez ovog drugog, druga polovina svakog NOT EXISTS-a ide u
+            // skeniranje cele tabele — na svakoj pretrazi oglasa.
+            e.HasIndex(x => new { x.BlockedId, x.BlockerId });
+
+            e.HasOne(x => x.Blocker)
+             .WithMany().HasForeignKey(x => x.BlockerId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(x => x.Blocked)
+             .WithMany().HasForeignKey(x => x.BlockedId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ── Listing.ModerationState ────────────────────────────────────────
+        builder.Entity<Listing>()
+               .Property(l => l.ModerationState)
+               .HasConversion<string>()
+               .HasMaxLength(16);
     }
 }

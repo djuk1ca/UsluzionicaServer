@@ -23,6 +23,16 @@ public sealed class ListingsController(
     [ProducesResponseType(typeof(PagedResult<ListingDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> Search([FromQuery] ListingQueryParams p)
     {
+        // Ko gleda — iz tokena, nikad iz query stringa.
+        //
+        // Endpoint je javan, ali ako token ipak stigne, autentifikacioni
+        // middleware popuni User i bez [Authorize]. Odatle se zna čije blokade
+        // treba primeniti.
+        //
+        // ViewerUserId nosi [BindNever] baš zato da ova dodela bude jedini put
+        // kojim vrednost ulazi — inače bi je klijent mogao poslati sam.
+        p.ViewerUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
         var result = await listingService.SearchAsync(p);
         return Ok(new { success = true, data = result });
     }
