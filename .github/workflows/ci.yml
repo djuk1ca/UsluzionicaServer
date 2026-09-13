@@ -297,7 +297,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Izgradi sliku (bez objavljivanja)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         env:
           # Gasi kacenje  build record artefakta.
           # Koristan je samo za uvoz u Docker Desktop Builds pregled, a ovde
