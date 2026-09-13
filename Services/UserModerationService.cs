@@ -95,12 +95,26 @@ public sealed class UserModerationService(
 
     /// <summary>
     /// Vraća nalog u rad.
-    ///
-    /// NAMERNO NE VRAĆA OGLASE IZ ARHIVE. Arhiviranje je jednosmerno sa naše
-    /// strane: u trenutku vraćanja se ne zna koji su oglasi bili arhivirani
-    /// zbog kazne, a koje je vlasnik sam arhivirao ranije. Vlasnik svoje oglase
-    /// vraća sam, kroz „Moje oglase" — i tako svesno potvrđuje svaki.
     /// </summary>
+    /// <remarks>
+    /// NE VRAĆA OGLASE IZ ARHIVE, i to je poznato ograničenje, ne dovršena
+    /// odluka.
+    ///
+    /// Razlog zašto se ne vraćaju automatski: u trenutku vraćanja se ne zna
+    /// koje je oglase arhivirala baš deaktivacija, a koje je vlasnik sam
+    /// sklonio ranije — pa bi automatsko vraćanje oživelo i one koje je svesno
+    /// povukao.
+    ///
+    /// ALI vlasnik ih ne može vratiti ni sam: i <c>GetByIdAsync</c> i
+    /// <c>GetByProviderAsync</c> filtriraju <c>Status != Archived</c>, pa
+    /// arhiviran oglas ne vidi niko, uključujući vlasnika. Praktično, posle
+    /// vraćanja naloga oglasi su izgubljeni.
+    ///
+    /// Rešenje kad za to bude vremena: obeležiti oglase koje je arhivirala
+    /// deaktivacija (zaseban <c>ModerationState</c> ili polje sa datumom) i pri
+    /// vraćanju obnoviti tačno te. Vidi
+    /// <c>ModerationCleanupTests.Deaktivacija_SklanjaOglasIVlasniku</c>.
+    /// </remarks>
     public async Task<(bool Success, string? Error)> VratiAsync(string userId)
     {
         var postoji = await db.Users.AnyAsync(u => u.Id == userId);

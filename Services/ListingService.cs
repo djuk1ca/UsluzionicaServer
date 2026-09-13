@@ -15,6 +15,7 @@ public sealed class ListingService(
     UserManager<ApplicationUser> userManager,
     IWebHostEnvironment          env,
     CategorySearchIndex          categoryIndex,
+    ImageModerationGate          imageGate,
     ILogger<ListingService>      logger)
 {
     // ── Podešavanja slojevite pretrage ─────────────────────────────────────
@@ -100,11 +101,19 @@ public sealed class ListingService(
             .Where(l => l.Status == ListingStatus.Active)
             // Oglasi deaktiviranih naloga NE SMEJU u rezultate.
             //
-            // Ranije je ovde stajao samo uslov o statusu oglasa. IsActive se
-            // proveravao isključivo pri prijavi i osvežavanju tokena, pa je
-            // banovan korisnik gubio pristup — a njegovi oglasi su i dalje
-            // stajali u pretrazi. Sadržaj zbog kog je nalog ugašen ostajao je
-            // na ekranu, što je gore nego da nismo reagovali.
+            // ODBRANA U DUBINU, ne jedina brana. Oba puta koja gase nalog
+            // (UserModerationService.DeaktivirajAsync i UserService brisanje
+            // naloga) usput arhiviraju sve oglase, pa ih već uslov iznad
+            // sakriva. Ovaj filter hvata nesklad između ta dva stanja: red u
+            // bazi popravljen ručno, budući put koji zaboravi da arhivira,
+            // arhiviranje koje pukne na pola.
+            //
+            // Zašto je uopšte dodat: dok je AdminService.DeactivateUserAsync bio
+            // običan toggle nad IsActim, oglasi banovanog korisnika su ZAISTA
+            // ostajali u pretrazi. Tada je ovo bila jedina brana.
+            //
+            // Cena je nula — join na ProviderProfile.User već postoji zbog
+            // Include-a iznad.
             .Where(l => l.ProviderProfile.User.IsActive);
 
         // Blokirani, u oba smera.
@@ -598,6 +607,12 @@ public sealed class ListingService(
         var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxImageBytes);
         if (ext is null)
             return (null, uploadError);
+
+        // Automatska provera sadržaja slike. Ide POSLE provere formata: nema
+        // smisla slati na analizu nešto što nije ni validna slika.
+        var (cista, moderationError) = await imageGate.ProveriAsync(file, userId, listingId);
+        if (!cista)
+            return (null, moderationError);
 
         // Putanja: wwwroot/uploads/listings/{listingId}/{guid}.{ext}
         var fileName  = $"{Guid.NewGuid():N}{ext}";

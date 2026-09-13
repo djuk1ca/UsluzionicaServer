@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;     // AddInMemoryCollection
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Services;
 
 namespace UsluzionicaServer.IntegrationTests.Infrastructure;
@@ -21,6 +22,9 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
 {
     /// <summary>Instanca koju testovi čitaju da bi videli "poslate" emailove.</summary>
     public FakeEmailService Email { get; } = new();
+
+    /// <summary>Provera slika kojom testovi upravljaju — vidi StubImageModerator.</summary>
+    public StubImageModerator ImageModerator { get; } = new();
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -90,6 +94,13 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
             // ── Zameni email ────────────────────────────────────────────────
             services.RemoveAll<IEmailService>();
             services.AddSingleton<IEmailService>(Email);
+
+            // ── Zameni proveru slika ────────────────────────────────────────
+            // Program.cs ovde registruje NoopImageModerator (jer
+            // ImageModeration:Provider nije postavljen), pa bi bez zamene svaka
+            // slika prolazila i test ne bi imao šta da dokaže.
+            services.RemoveAll<IImageModerator>();
+            services.AddSingleton<IImageModerator>(ImageModerator);
         });
     }
 }

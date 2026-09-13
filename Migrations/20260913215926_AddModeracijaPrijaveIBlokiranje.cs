@@ -47,7 +47,7 @@ namespace UsluzionicaServer.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Reports", x => x.Id);
-                    table.CheckConstraint("CK_Report_JednaMeta", "([ListingId] IS NULL) <> ([ReportedUserId] IS NULL)");
+                    table.CheckConstraint("CK_Report_JednaMeta", "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + (CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) = 1");
                     table.ForeignKey(
                         name: "FK_Reports_AspNetUsers_ReportedUserId",
                         column: x => x.ReportedUserId,

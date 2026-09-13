@@ -675,9 +675,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             // Tačno jedna meta. Bez ovoga je moguća prijava ni o čemu (obe NULL)
             // ili prijava o dve stvari (obe popunjene) — koju onda admin ne može
             // da reši, jer ne zna šta uklanja.
+            //
+            // ZAŠTO CASE, A NE `(A IS NULL) <> (B IS NULL)`:
+            // Taj oblik je kraći i radi u PostgreSQL-u, ali SQL Server ga odbija
+            // sa „Incorrect syntax near '<'". T-SQL nema logički tip u izrazima
+            // — `IS NULL` je predikat, ne vrednost, pa se dva predikata ne mogu
+            // porediti međusobno. Zbrajanje 0/1 je zaobilaznica koja to rešava.
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_Report_JednaMeta",
-                "([ListingId] IS NULL) <> ([ReportedUserId] IS NULL)"));
+                "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + " +
+                "(CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) = 1"));
 
             // Jedan korisnik ne može dvaput prijaviti istu metu DOK PRVA ČEKA.
             // Filtrirani indeks, a ne običan: posle rešavanja sme ponovo, jer se

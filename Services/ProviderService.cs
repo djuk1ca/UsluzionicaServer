@@ -17,6 +17,7 @@ public sealed class ProviderService(
     IWebHostEnvironment          env,
     IConfiguration               config,
     ReferralService              referralService,
+    ImageModerationGate          imageGate,
     CacheService                 cache,
     ILogger<ProviderService>     logger)
 {
@@ -259,6 +260,12 @@ public sealed class ProviderService(
         var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxImageBytes);
         if (ext is null)
             return (null, uploadError);
+
+        // Automatska provera sadržaja. Bez listingId — cover ne pripada oglasu,
+        // pa se sumnjiva slika prijavljuje kao korisnik, ne kao oglas.
+        var (cista, moderationError) = await imageGate.ProveriAsync(file, userId, listingId: null);
+        if (!cista)
+            return (null, moderationError);
 
         var fileName  = $"cover_{profile.Id}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "covers");

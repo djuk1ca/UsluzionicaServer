@@ -31,6 +31,38 @@ public sealed class TestData(UsluzionicaWebFactory factory)
 
     // ── Korisnici ──────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Korisnik u ulozi „Admin".
+    /// </summary>
+    /// <remarks>
+    /// MORA SE PRAVITI U SVAKOM TESTU KOJI GA TRAŽI. Respawn između testova
+    /// prazni AspNetUsers — nije na listi izuzetaka u DatabaseFixture — pa
+    /// admin koji Program.cs seeduje pri startu nestane posle prvog testa, a
+    /// host se ne pokreće ponovo.
+    ///
+    /// Same uloge preživljavaju, jer AspNetRoles jeste na toj listi.
+    /// </remarks>
+    public async Task<ApplicationUser> CreateAdminAsync(
+        string email = "admin.test@usluzionica.rs")
+    {
+        var user = await CreateConfirmedUserAsync(email, fullName: "Admin Testić");
+
+        using var scope = factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        var dodat = await users.FindByIdAsync(user.Id)
+            ?? throw new InvalidOperationException("Admin nalog nije pronađen posle kreiranja.");
+
+        var rezultat = await users.AddToRoleAsync(dodat, "Admin");
+
+        if (!rezultat.Succeeded)
+            throw new InvalidOperationException(
+                "Dodela Admin uloge nije uspela: " +
+                string.Join(", ", rezultat.Errors.Select(e => e.Description)));
+
+        return dodat;
+    }
+
     /// <summary>Korisnik sa potvrđenim emailom — spreman za sve tokove.</summary>
     public async Task<ApplicationUser> CreateConfirmedUserAsync(
         string  email,

@@ -2518,7 +2518,7 @@ namespace UsluzionicaServer.Migrations
 
                     b.ToTable("Reports", t =>
                         {
-                            t.HasCheckConstraint("CK_Report_JednaMeta", "([ListingId] IS NULL) <> ([ReportedUserId] IS NULL)");
+                            t.HasCheckConstraint("CK_Report_JednaMeta", "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + (CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) = 1");
                         });
                 });
 

@@ -259,6 +259,25 @@ builder.Services.AddScoped<AdminService>();
 builder.Services.AddScoped<BlockService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<UserModerationService>();
+builder.Services.AddScoped<ImageModerationGate>();
+
+// ── Automatska provera slika ───────────────────────────────────────────────
+// Podrazumevano ISKLJUČENA (Noop). Uključuje se podešavanjem
+// ImageModeration:Provider = "CloudVision" i ključem u ImageModeration:ApiKey.
+//
+// Podrazumevano isključena, a ne uključena: bez ključa bi Cloud Vision svaki
+// upload slao na neuspeo poziv, a fail-open bi ga pretvarao u prijavu — pa bi
+// svaka slika u razvoju i u testovima završila u redu za moderaciju.
+var moderationProvider = builder.Configuration["ImageModeration:Provider"];
+
+if (string.Equals(moderationProvider, "CloudVision", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient<IImageModerator, CloudVisionImageModerator>();
+}
+else
+{
+    builder.Services.AddSingleton<IImageModerator, NoopImageModerator>();
+}
 
 // Singleton servisi (žive dok god živi aplikacija)
 builder.Services.AddSingleton<MessageEncryption>();
