@@ -39,6 +39,10 @@ services:
     environment:
       # Domen na koji Caddy traži sertifikat. Dolazi iz .env na serveru.
       API_DOMAIN: ${API_DOMAIN}
+      # Domen sajta. Caddyfile ga koristi i za apex i za `www.` varijantu.
+      # Ako nedostaje, {$APP_DOMAIN} se raširi u prazno i Caddy odbija ceo
+      # fajl porukom: subject does not qualify for certificate: www.
+      APP_DOMAIN: ${APP_DOMAIN}
       # Let's Encrypt šalje upozorenje na ovu adresu ako obnavljanje zakaže.
       ACME_EMAIL: ${ACME_EMAIL}
     depends_on:

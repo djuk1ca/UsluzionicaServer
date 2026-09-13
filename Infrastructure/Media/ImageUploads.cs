@@ -49,18 +49,27 @@ public static class ImageUploads
     /// Obrasci koji u binarnoj slici nemaju šta da traže. Sve je malim slovima —
     /// pretraga spušta ASCII slova pre poređenja, pa je neosetljiva na veličinu.
     ///
-    /// Verovatnoća da se sedmobajtni niz kao "&lt;script" slučajno pojavi u
-    /// pikselima je zanemarljiva, pa lažni pozitivi nisu praktičan problem.
+    /// <b>SVAKI MARKER MORA IMATI NAJMANJE 5 BAJTOVA.</b>
+    ///
+    /// Kompresovani podaci slike se ponašaju kao nasumični bajtovi, pa se kratak
+    /// niz pojavljuje slučajno. Dvobajtni niz izlazi otprilike jednom na 65.536
+    /// bajtova, dakle ~15 puta po megabajtu — to nije rizik od lažnog pozitiva
+    /// nego sigurnost.
+    ///
+    /// Prvobitna lista je sadržala `&lt;%` (2) i `&lt;?=` (3) i odbijala je svaku
+    /// fotografiju sa telefona. Na 5 bajtova verovatnoća pada na ~1 na 10^12 po
+    /// poziciji, što je na slici od 10 MB oko jednom na 100.000 otpremanja.
+    /// Test `SviMarkeri_MorajuBitiDovoljnoDugi` čuva to pravilo.
+    ///
+    /// `&lt;svg` je izbačen i kao prekratak i kao suvišan: SVG fajl ionako ne
+    /// prolazi proveru potpisa formata, pa do ove pretrage nikad ne stigne.
     /// </summary>
     private static readonly byte[][] ScriptMarkers =
     [
         "<script"u8.ToArray(),
         "<?php"u8.ToArray(),
-        "<?="u8.ToArray(),
-        "<%"u8.ToArray(),
         "<html"u8.ToArray(),
         "<!doctype"u8.ToArray(),
-        "<svg"u8.ToArray(),
         "<iframe"u8.ToArray(),
         "javascript:"u8.ToArray()
     ];

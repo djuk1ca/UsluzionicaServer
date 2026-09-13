@@ -141,6 +141,50 @@ public class ImageUploadsTests
     }
 
     [Fact]
+    public async Task StvarnaFotografija_NeSmeDaBudeLaznoOdbijena()
+    {
+        // REGRESIJA: prava fotografija sa telefona je odbijana porukom
+        // "Slika sadrži nedozvoljen sadržaj".
+        //
+        // Uzrok: među markerima su bili `<%` (2 bajta) i `<?=` (3 bajta).
+        // Kompresovani JPEG podaci se ponašaju kao nasumični bajtovi, pa se
+        // dvobajtni niz pojavljuje otprilike jednom na 65.536 bajtova — dakle
+        // ~15 puta po megabajtu. Lažni pozitiv nije bio moguć nego zagarantovan.
+        //
+        // Determinističko seme da test uvek daje isti sadržaj i ostane ponovljiv.
+        var rnd  = new Random(12345);
+        var telo = new byte[1024 * 1024];
+        rnd.NextBytes(telo);
+
+        var fajl = new byte[12 + telo.Length];
+        Jpeg().AsSpan(0, 12).CopyTo(fajl);
+        telo.CopyTo(fajl, 12);
+
+        var (ext, error) = await ImageUploads.ValidateAsync(File(fajl), MaxBytes);
+
+        error.Should().BeNull("fotografija bez payload-a ne sme biti odbijena");
+        ext.Should().Be(".jpg");
+    }
+
+    [Fact]
+    public void SviMarkeri_MorajuBitiDovoljnoDugi()
+    {
+        // Kratak marker je matematički osuđen na lažne pozitive nad binarnim
+        // sadržajem. Prag od 5 bajtova daje ~1 na 10^12 po poziciji, što je na
+        // slici od 10 MB oko jednom na 100.000 otpremanja — prihvatljivo.
+        //
+        // Test postoji da niko kasnije ne doda kratak marker „za svaki slučaj".
+        var markeri = typeof(ImageUploads)
+            .GetField("ScriptMarkers", System.Reflection.BindingFlags.NonPublic
+                                     | System.Reflection.BindingFlags.Static)!
+            .GetValue(null) as byte[][];
+
+        markeri.Should().NotBeNull();
+        markeri!.Should().OnlyContain(m => m.Length >= 5,
+            "kraći markeri se slučajno pojavljuju u kompresovanim podacima");
+    }
+
+    [Fact]
     public async Task CistaSlikaBezPayloada_Prolazi()
     {
         var (ext, error) = await ImageUploads.ValidateAsync(

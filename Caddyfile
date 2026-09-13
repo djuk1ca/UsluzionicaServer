@@ -79,3 +79,62 @@
 		format json
 	}
 }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# usluzionica.rs — marketinški sajt i pravne stranice
+#
+# Dopisati na KRAJ postojećeg Caddyfile-a, ispod bloka za {$API_DOMAIN}.
+# Caddy sam traži sertifikat za nov domen — ne piše se ništa, isto kao za API.
+# Volumen `caddy-data` mora da ostane; u njemu su sertifikati i ACME nalog.
+# ═══════════════════════════════════════════════════════════════════════════
+
+{$APP_DOMAIN}, www.{$APP_DOMAIN} {
+	# ── www → apex ─────────────────────────────────────────────────────────
+	# Jedna kanonska adresa. Dve adrese sa istim sadržajem cepaju SEO težinu,
+	# a Google bira sam koju će prikazati.
+	@www host www.{$APP_DOMAIN}
+	redir @www https://{$APP_DOMAIN}{uri} permanent
+
+	# ── Bezbednosna zaglavlja ──────────────────────────────────────────────
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+
+		# CSP `default-src 'self'` prolazi samo zato što su fontovi i (kasnije)
+		# Three.js lokalni. Da se povlače sa Google Fonts-a i cdnjs-a, ovde bi
+		# morali da stoje njihovi hostovi — i izgubio bi se i deo zaštite i
+		# argument iz politike privatnosti da podaci ne odlaze trećoj strani.
+		#
+		# img-src pušta api.usluzionica.rs zbog slika oglasa u Fazi 2.
+		# 'unsafe-inline' za stilove je ustupak markupu prenetom iz dizajna,
+		# koji stilove drži u atributima. Skinuti ga kad stilovi pređu u CSS.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://api.usluzionica.rs; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://api.usluzionica.rs; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# ── Keširanje ──────────────────────────────────────────────────────────
+	# Statika ima otisak u imenu (MapStaticAssets), pa sme godinu dana.
+	# HTML ne sme — tekst se menja, a stranica mora da se osveži isti dan.
+	@fingerprinted path_regexp \.[0-9a-z]{8,}\.(css|js|woff2|png|svg|webp)$
+	header @fingerprinted Cache-Control "public, max-age=31536000, immutable"
+
+	@statika path *.woff2 *.webp *.png *.svg *.ico
+	header @statika Cache-Control "public, max-age=604800"
+
+	# ── Aplikacija ─────────────────────────────────────────────────────────
+	# `site` je ime servisa iz compose-a; Docker ga razrešava u internoj mreži.
+	reverse_proxy site:8080 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output file /var/log/caddy/site-access.log {
+			roll_size 10mb
+			roll_keep 5
+		}
+		format json
+	}
+}
