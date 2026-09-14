@@ -74,6 +74,11 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 ["Booking:ExecuteAfterDays"]              = "3",
                 ["Booking:ServiceRewardTokens"]           = "0.50",
 
+                // Nagrada provajderu je namerno RAZLIČITA od klijentove, iz
+                // istog razloga kao kod referral rata ispod: da zamena dve
+                // isplate ne bi prošla nezapaženo.
+                ["Booking:ProviderRewardTokens"]          = "0.20",
+
                 // Referral se isplaćuje u dve rate. Vrednosti su namerno
                 // RAZLIČITE (2 i 3), a ne obe iste: da su jednake, test koji
                 // greškom isplati pogrešnu ratu i dalje bi prošao.

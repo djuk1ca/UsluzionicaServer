@@ -25,7 +25,8 @@ namespace UsluzionicaServer.IntegrationTests.Services;
 /// </summary>
 public class BookingRulesTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
 {
-    private const decimal NagradaZaUslugu = 0.50m;  // Booking:ServiceRewardTokens
+    private const decimal NagradaZaUslugu   = 0.50m;  // Booking:ServiceRewardTokens
+    private const decimal NagradaProvajderu = 0.20m;  // Booking:ProviderRewardTokens
     private const int     DanaDoIzvrsenja = 3;      // Booking:ExecuteAfterDays
 
     /// <summary>Provajder sa oglasom + klijent sa potvrđenim emailom.</summary>
@@ -372,7 +373,7 @@ public class BookingRulesTests(DatabaseFixture fixture) : IntegrationTestBase(fi
     }
 
     [Fact]
-    public async Task Izvrsenje_PosleIstekaTriDana_ProlaziIIsplacujeTokeneKlijentu()
+    public async Task Izvrsenje_PosleIstekaTriDana_ProlaziIIsplacujeTokeneObemaStranama()
     {
         // POZITIVAN par. Bez njega bi kod koji ODUVEK odbija izvršenje prošao
         // test iznad — a to bi značilo da niko nikad ne može dobiti nagradu.
@@ -394,15 +395,26 @@ public class BookingRulesTests(DatabaseFixture fixture) : IntegrationTestBase(fi
 
         (await Query(db => db.ServiceExecutions.CountAsync())).Should().Be(1);
 
-        // Nagradu dobija KLIJENT, ne provajder — provajder je već naplatio uslugu.
+        // Obe strane dobijaju nagradu, i to različitu.
+        //
+        // Klijentova nagrada plaća korišćenje platforme, provajderova plaća
+        // SAM ČIN označavanja — bez nje provajder nema razlog da booking
+        // prevede u Completed, a dok to ne uradi, klijent ne može da oceni
+        // uslugu. Zato se obe proveravaju ovde, a ne samo klijentova.
         (await Data.GetTokenBalanceAsync(klijentId)).Should().Be(NagradaZaUslugu);
-        (await Data.GetTokenBalanceAsync(provajderId)).Should().Be(0m);
+        (await Data.GetTokenBalanceAsync(provajderId)).Should().Be(NagradaProvajderu);
 
-        var zapis = await Query(db => db.TokenTransactions
-            .SingleAsync(t => t.Kind == TokenKind.ServiceReward));
-        zapis.UserId.Should().Be(klijentId);
-        zapis.Amount.Should().Be(NagradaZaUslugu);
-        zapis.BalanceAfter.Should().Be(NagradaZaUslugu);
+        // Transakcije se traže PO KORISNIKU, ne po vrsti: obe nose
+        // TokenKind.ServiceReward, pa bi upit samo po vrsti našao dva reda.
+        var zapisKlijenta = await Query(db => db.TokenTransactions
+            .SingleAsync(t => t.Kind == TokenKind.ServiceReward && t.UserId == klijentId));
+        zapisKlijenta.Amount.Should().Be(NagradaZaUslugu);
+        zapisKlijenta.BalanceAfter.Should().Be(NagradaZaUslugu);
+
+        var zapisProvajdera = await Query(db => db.TokenTransactions
+            .SingleAsync(t => t.Kind == TokenKind.ServiceReward && t.UserId == provajderId));
+        zapisProvajdera.Amount.Should().Be(NagradaProvajderu);
+        zapisProvajdera.BalanceAfter.Should().Be(NagradaProvajderu);
     }
 
     [Fact]
@@ -451,8 +463,19 @@ public class BookingRulesTests(DatabaseFixture fixture) : IntegrationTestBase(fi
         (await Data.GetTokenBalanceAsync(klijentId)).Should().Be(NagradaZaUslugu,
             "nagrada se isplaćuje tačno jednom po izvršenoj usluzi");
 
+        (await Data.GetTokenBalanceAsync(provajderId)).Should().Be(NagradaProvajderu,
+            "i provajderova nagrada se isplaćuje tačno jednom");
+
         (await Query(db => db.ServiceExecutions.CountAsync())).Should().Be(1);
-        (await Query(db => db.TokenTransactions.CountAsync(t => t.Kind == TokenKind.ServiceReward)))
+
+        // Po jedna transakcija po strani, ne jedna ukupno: od kad se nagrađuju
+        // obe strane, zbirni broj je 2 i sam po sebi ne govori da nijedna nije
+        // isplaćena dvaput.
+        (await Query(db => db.TokenTransactions
+            .CountAsync(t => t.Kind == TokenKind.ServiceReward && t.UserId == klijentId)))
+            .Should().Be(1);
+        (await Query(db => db.TokenTransactions
+            .CountAsync(t => t.Kind == TokenKind.ServiceReward && t.UserId == provajderId)))
             .Should().Be(1);
 
         rezultat.Should().BeNull("drugi poziv ne sme prijaviti novo izvršenje");

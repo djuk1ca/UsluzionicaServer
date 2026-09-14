@@ -60,6 +60,25 @@ public sealed class BookingsController(BookingService bookingService) : Controll
         return Ok(new { success = true, data = list, total = list.Count });
     }
 
+    // ── GET /api/bookings/pending-review ──────────────────────────────────
+    /// <summary>
+    /// Izvršene usluge koje prijavljeni klijent još nije ocenio.
+    ///
+    /// Puni podsetnik koji iskoči pri otvaranju aplikacije. Odvojeno od
+    /// <c>outgoing</c> zato što ta lista vraća SVE rezervacije u svim
+    /// statusima, pa bi klijent morao sam da zaključuje šta je neocenjeno — a
+    /// za to mu trebaju i recenzije po svakom oglasu, dakle još po jedan upit
+    /// za svaku (tako to danas radi stranica „Moje rezervacije").
+    /// </summary>
+    [HttpGet("pending-review")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPendingReview()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var list   = await bookingService.GetPendingReviewsAsync(userId);
+        return Ok(new { success = true, data = list, total = list.Count });
+    }
+
     // ── PATCH /api/bookings/{id}/confirm ──────────────────────────────────
     /// <summary>
     /// Provider potvrđuje zahtev (Pending → Confirmed).
