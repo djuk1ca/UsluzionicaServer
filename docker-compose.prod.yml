@@ -86,6 +86,13 @@ services:
       Email__From: ${EMAIL_FROM}
       Email__FromName: ${EMAIL_FROM_NAME:-Uslužionica}
       Email__ReplyTo: ${EMAIL_REPLY_TO}
+      Booking__ExecuteAfterDays: ${BOOKING_EXECUTE_AFTER_DAYS:-3}
+
+      # Nagrade u tokenima za izvršenu uslugu. Podrazumevane vrednosti su iste
+      # kao u appsettings.json — stoje ovde da se mogu promeniti kroz .env i
+      # `up -d`, bez novog build-a i bez čekanja na CD.
+      Booking__ServiceRewardTokens: ${BOOKING_SERVICE_REWARD:-5}
+      Booking__ProviderRewardTokens: ${BOOKING_PROVIDER_REWARD:-3}
 
     # BEZ IJEDNOG PORTA NA HOSTU.
     #

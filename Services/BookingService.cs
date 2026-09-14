@@ -21,10 +21,27 @@ public sealed class BookingService(
     IConfiguration       config,
     NotificationService  notificationService,
     BlockService         blockService,
+    ConversationService  conversationService,
     ILogger<BookingService> logger)
 {
+    // ── NAGRADE ZA IZVRŠENU USLUGU ─────────────────────────────────────────
+    // Obe strane dobijaju tokene, i to namerno različito.
+    //
+    // Klijent dobija više (5) jer je on taj koji tokene i troši — na popuste i
+    // na isticanje sopstvenih oglasa. To mu je razlog da posao dogovara kroz
+    // aplikaciju umesto telefonom.
+    //
+    // Uslugodavac dobija manje (3), ali dobija ga ZA SAM ČIN OZNAČAVANJA. Bez
+    // toga je označavanje izvršene usluge čist trošak vremena bez ikakve
+    // koristi po njega, pa se u praksi ne radi — a dok booking stoji na
+    // „Potvrđeno", klijent ne može da ostavi recenziju. Nagrada za uslugodavca
+    // zato ne kupuje samo njegovu pažnju nego otključava i recenzije, koje su
+    // ono što celu platformu drži.
     private decimal ServiceRewardTokens =>
-        config.GetValue<decimal>("Booking:ServiceRewardTokens", 0.30m);
+        config.GetValue<decimal>("Booking:ServiceRewardTokens", 5m);
+
+    private decimal ProviderRewardTokens =>
+        config.GetValue<decimal>("Booking:ProviderRewardTokens", 3m);
 
     private int ExecuteAfterDays =>
         config.GetValue<int>("Booking:ExecuteAfterDays", 3);
@@ -98,6 +115,17 @@ public sealed class BookingService(
 
         db.BookingRequests.Add(booking);
         await db.SaveChangesAsync(); // save da dobijemo booking.Id
+
+        // Razgovor se otvara ZAJEDNO sa zahtevom, kod oba korisnika.
+        //
+        // Zahtev za uslugu skoro uvek povlači pitanje — kad, gde, koliko tačno.
+        // Ranije je uslugodavac dobijao obaveštenje o zahtevu, ali razgovora
+        // nije bilo dok ga neko ručno ne otvori preko „Poruka" na oglasu, pa je
+        // propratna poruka tražila zaobilazan put kroz stranicu oglasa.
+        //
+        // Pošto je razgovor zajednički red u bazi, dovoljno je napraviti ga
+        // jednom — pojavljuje se na listi kod oboje.
+        await conversationService.EnsureExistsAsync(clientId, providerUserId);
 
         await notificationService.SendAsync(
             providerUserId,
@@ -311,9 +339,13 @@ public sealed class BookingService(
 
         await db.SaveChangesAsync(); // da dobijemo execution.Id
 
-        // Token nagrada za klijenta (0.5 tokena po svakoj realizovanoj usluzi)
-        var rewardAmount = ServiceRewardTokens;
-        var client       = booking.Client;
+        // ── Nagrade ──────────────────────────────────────────────────────────
+        // Obe transakcije se upisuju u istom SaveChanges-u kao i balansi, pa je
+        // nemoguće da balans poraste a trag o tome izostane (ili obrnuto).
+        var rewardAmount   = ServiceRewardTokens;
+        var providerReward = ProviderRewardTokens;
+        var client         = booking.Client;
+        var provider       = booking.Provider;
 
         client.TokenBalance += rewardAmount;
 
@@ -328,21 +360,82 @@ public sealed class BookingService(
             CreatedAt    = now
         });
 
+        // Uslugodavac se nagrađuje što je uslugu označio kao izvršenu — vidi
+        // obrazloženje uz ProviderRewardTokens.
+        if (providerReward > 0 && provider is not null)
+        {
+            provider.TokenBalance += providerReward;
+
+            db.TokenTransactions.Add(new TokenTransaction
+            {
+                UserId       = booking.ProviderUserId,
+                Amount       = providerReward,
+                Kind         = TokenKind.ServiceReward,
+                Description  = $"Nagrada za označenu izvršenu uslugu: {booking.Listing.Title}",
+                ReferenceId  = booking.Id,
+                BalanceAfter = provider.TokenBalance,
+                CreatedAt    = now
+            });
+        }
+
         await db.SaveChangesAsync();
 
+        // Obaveštenje klijentu nosi DVE stvari: tokene i poziv na ocenu.
+        //
+        // Spojene su u jedno namerno. Dva obaveštenja jedno za drugim za isti
+        // događaj čitaju se kao greška aplikacije, a poziv na ocenu bez povoda
+        // deluje nametljivo — ovako povod stoji u istoj rečenici.
+        //
+        // ReferenceId je ID BOOKING-a, ne izvršenja: klijent sa tog ekrana ide
+        // na recenziju, a recenzija se vezuje za booking (vidi
+        // ReviewService.CreateAsync). Izvršenje nema svoju stranicu.
         await notificationService.SendAsync(
             booking.ClientId,
             NotificationKind.TokenEarned,
-            "Zaradili ste tokene!",
-            $"Dobili ste {rewardAmount} tokena za uslugu \"{booking.Listing.Title}\".",
-            execution.Id);
+            "Usluga je izvršena — zaradili ste tokene",
+            $"Dobili ste {rewardAmount:0.##} tokena za uslugu \"{booking.Listing.Title}\". " +
+            "Ocenite uslugu da drugi znaju kako je prošlo.",
+            booking.Id);
 
         logger.LogInformation(
-            "Booking #{Id} izvršen — klijent {ClientId} nagrađen sa {Amount} tokena (novi balans: {Balance})",
-            bookingId, booking.ClientId, rewardAmount, client.TokenBalance);
+            "Booking #{Id} izvršen — klijent {ClientId} +{Amount} tokena (balans {Balance}), " +
+            "uslugodavac {ProviderId} +{ProviderAmount}",
+            bookingId, booking.ClientId, rewardAmount, client.TokenBalance,
+            booking.ProviderUserId, providerReward);
 
         booking.ServiceExecution = execution;
         return (MapToDto(booking), null);
+    }
+
+    // ── NEOCENJENE IZVRŠENE USLUGE ─────────────────────────────────────────
+    /// <summary>
+    /// Izvršene usluge klijenta za koje još nije ostavio recenziju.
+    ///
+    /// Postojanje recenzije se proverava po PARU (autor, oglas), a ne po
+    /// booking-u. Recenzija sme da se ostavi i bez veze sa booking-om
+    /// (<c>BookingRequestId</c> je opciono u <c>CreateReviewDto</c>), pa bi
+    /// provera po booking-u prijavila kao neocenjenu i uslugu koju je klijent
+    /// upravo ocenio sa stranice oglasa. Isti kriterijum koristi i lista
+    /// „Moje rezervacije" kad odlučuje da li da ponudi dugme za ocenu.
+    /// </summary>
+    public async Task<List<PendingReviewDto>> GetPendingReviewsAsync(string clientId)
+    {
+        return await db.BookingRequests
+            .AsNoTracking()
+            .Where(b => b.ClientId == clientId
+                     && b.Status   == BookingStatus.Completed
+                     && !db.Reviews.Any(r => r.AuthorId  == clientId
+                                          && r.ListingId == b.ListingId))
+            .OrderByDescending(b => b.UpdatedAt)
+            .Select(b => new PendingReviewDto
+            {
+                BookingId    = b.Id,
+                ListingId    = b.ListingId,
+                ListingTitle = b.Listing.Title,
+                ProviderName = b.Provider.FullName,
+                CompletedAt  = b.UpdatedAt
+            })
+            .ToListAsync();
     }
 
     // ── HELPER ─────────────────────────────────────────────────────────────

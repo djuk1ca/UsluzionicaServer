@@ -27,6 +27,25 @@ public sealed class ConversationsController(ConversationService conversationServ
         return Ok(new { success = true, data = list, total = list.Count });
     }
 
+    // ── GET /api/conversations/unread ─────────────────────────────────────
+    /// <summary>
+    /// ID-jevi razgovora u kojima korisnika čeka nepročitana poruka.
+    ///
+    /// Postoji odvojeno od <c>GET /api/conversations</c> zato što badge u
+    /// donjoj navigaciji treba da se osveži pri svakom otvaranju aplikacije, a
+    /// puna lista razgovora nosi i imena, avatare, pretpreglede poruka i online
+    /// status — sve što badge-u ne treba i što se ne prikazuje dok korisnik ne
+    /// otvori tab sa porukama.
+    /// </summary>
+    [HttpGet("unread")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetUnread()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var ids    = await conversationService.GetUnreadConversationIdsAsync(userId);
+        return Ok(new { success = true, data = ids });
+    }
+
     // ── POST /api/conversations ───────────────────────────────────────────
     /// <summary>
     /// Otvara konverzaciju sa datim korisnikom.

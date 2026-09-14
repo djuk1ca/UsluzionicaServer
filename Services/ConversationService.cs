@@ -155,6 +155,92 @@ public sealed class ConversationService(
         return (await ToConversationDtoAsync(conversation, requesterId), null);
     }
 
+    // ── RAZGOVOR BEZ OTVARANJA ─────────────────────────────────────────────
+    /// <summary>
+    /// Osigurava da razgovor između dvoje ljudi postoji, i ništa više.
+    ///
+    /// Odvojeno od <see cref="GetOrCreateAsync"/> namerno. Taj metod služi
+    /// korisniku koji je pritisnuo „Poruka": proverava blokadu, traži primaoca
+    /// preko UserManager-a i sastavlja pun DTO za ekran. Ovde ništa od toga ne
+    /// treba — razgovor se pravi kao propratni efekat rezervacije, pozivalac je
+    /// već proverio i blokadu i postojanje oba naloga, a DTO nema ko da prikaže.
+    ///
+    /// Ne baca izuzetak ni u jednom slučaju. Razgovor je pogodnost uz
+    /// rezervaciju, a rezervacija je ono što korisnik zapravo traži — ako
+    /// pravljenje razgovora zakaže, rezervacija svejedno mora da prođe.
+    /// </summary>
+    public async Task EnsureExistsAsync(string userAId, string userBId, CancellationToken ct = default)
+    {
+        if (userAId == userBId) return;
+
+        // Ista normalizacija kao u GetOrCreateAsync: leksikografski manji ID
+        // ide kao User1. Bez toga bi UNIQUE indeks propustio duplikat kad
+        // rezervaciju i ručno otvaranje razgovora pokrenu suprotne strane.
+        var (user1Id, user2Id) = string.Compare(userAId, userBId, StringComparison.Ordinal) < 0
+            ? (userAId, userBId)
+            : (userBId, userAId);
+
+        var postoji = await db.Conversations
+            .AnyAsync(c => c.User1Id == user1Id && c.User2Id == user2Id, ct);
+
+        if (postoji) return;
+
+        db.Conversations.Add(new Conversation
+        {
+            User1Id   = user1Id,
+            User2Id   = user2Id,
+            CreatedAt = DateTime.UtcNow
+        });
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            logger.LogInformation(
+                "Razgovor otvoren uz rezervaciju: {U1} ↔ {U2}", user1Id, user2Id);
+        }
+        catch (DbUpdateException)
+        {
+            // Druga strana je u međuvremenu otvorila isti razgovor i UNIQUE
+            // indeks je to odbio. Razgovor postoji, što je jedino što je bilo
+            // važno — nema šta da se prijavi kao greška.
+        }
+    }
+
+    // ── NEPROČITANI RAZGOVORI ──────────────────────────────────────────────
+    /// <summary>
+    /// ID-jevi razgovora u kojima korisnika čeka bar jedna nepročitana poruka.
+    ///
+    /// Vraća ID-jeve, a ne samo broj, zato što klijent mora da održava taj
+    /// skup: kad se razgovor otvori, njegov ID se izbacuje, a kad stigne poruka
+    /// kroz SignalR, dodaje se. Sa golim brojem klijent ne bi znao da li nova
+    /// poruka dolazi iz razgovora koji se već broji ili iz novog, pa bi badge
+    /// brojao poruke umesto razgovora.
+    ///
+    /// Razgovori sa blokiranima se izostavljaju — isto pravilo kao u
+    /// <see cref="GetConversationsAsync"/>, jer badge ne sme da broji ono što
+    /// se na listi uopšte ne vidi.
+    /// </summary>
+    public async Task<List<int>> GetUnreadConversationIdsAsync(string userId)
+    {
+        var blokirani = await blockService.SviBlokiraniAsync(userId);
+
+        // Nepročitano se traži u bazi, blokirani se odbacuju u memoriji — isti
+        // razlog kao u GetConversationsAsync: skup razgovora je po prirodi
+        // kratak, a HashSet.Contains u LINQ upitu zavisi od prevoda u SQL koji
+        // ovde nije potreban ni za šta.
+        var kandidati = await db.Conversations
+            .AsNoTracking()
+            .Where(c => (c.User1Id == userId || c.User2Id == userId)
+                     && c.Messages.Any(m => m.SenderId != userId && !m.IsRead))
+            .Select(c => new { c.Id, c.User1Id, c.User2Id })
+            .ToListAsync();
+
+        return kandidati
+            .Where(c => !blokirani.Contains(c.User1Id == userId ? c.User2Id : c.User1Id))
+            .Select(c => c.Id)
+            .ToList();
+    }
+
     // ── ISTORIJA PORUKA ────────────────────────────────────────────────────
     /// <summary>
     /// Vraća paginovanu istoriju poruka, sortirane od NAJSTARIJE (hronološki).
