@@ -22,6 +22,16 @@ public class Listing
     public DateTime      CreatedAt         { get; set; } = DateTime.UtcNow;
     public DateTime      UpdatedAt         { get; set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Ishod moderacije. Odvojeno od <see cref="Status"/> namerno.
+    ///
+    /// <c>Status</c> je vlasnikova odluka (aktivan, pauziran, arhiviran), a ovo
+    /// je naša. Da su spojeni, vlasnik bi uklonjen oglas mogao da vrati u
+    /// <c>Active</c> preko postojećeg <c>PATCH /api/listings/{id}/status</c> i
+    /// time poništi moderacijsku odluku jednim klikom.
+    /// </summary>
+    public ModerationState ModerationState { get; set; } = ModerationState.Clean;
+
     // ── Denormalizovani indeks za pretragu ─────────────────────────────────
     // Foldovane kopije Title/Location/Description (mala slova, bez dijakritike,
     // ćirilica preslovljena). Održava ih AppDbContext.SaveChanges kroz

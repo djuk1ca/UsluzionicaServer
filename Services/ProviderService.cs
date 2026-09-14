@@ -17,6 +17,7 @@ public sealed class ProviderService(
     IWebHostEnvironment          env,
     IConfiguration               config,
     ReferralService              referralService,
+    ImageModerationGate          imageGate,
     CacheService                 cache,
     ILogger<ProviderService>     logger)
 {
@@ -120,7 +121,12 @@ public sealed class ProviderService(
     }
 
     // ── GET JAVNI PROFIL ───────────────────────────────────────────────────
-    public async Task<ProviderProfileDto?> GetPublicProfileAsync(int providerProfileId)
+    /// <param name="viewerUserId">
+    /// Ko gleda profil. Služi ISKLJUČIVO za proveru blokade i deaktivacije, i
+    /// to POSLE keša — vidi komentar u telu.
+    /// </param>
+    public async Task<ProviderProfileDto?> GetPublicProfileAsync(
+        int providerProfileId, string? viewerUserId = null)
     {
         // KEŠIRANO: javni profil povlači profil + korisnika + kategorije +
         // sve oglase sa slikama - najskuplji čitalački upit u aplikaciji.
@@ -131,14 +137,55 @@ public sealed class ProviderService(
         // beskorisnim zapisima.
         var cached = await cache.GetAsync<ProviderProfileDto>(
             CacheService.Keys.ProviderProfile(providerProfileId));
-        if (cached is not null) return cached;
 
-        var fresh = await GetProfileDtoAsync(providerProfileId, includeListings: true);
-        if (fresh is not null)
-            await cache.SetAsync(
-                CacheService.Keys.ProviderProfile(providerProfileId), fresh, ProfileTtl);
+        var profil = cached;
 
-        return fresh;
+        if (profil is null)
+        {
+            profil = await GetProfileDtoAsync(providerProfileId, includeListings: true);
+            if (profil is not null)
+                await cache.SetAsync(
+                    CacheService.Keys.ProviderProfile(providerProfileId), profil, ProfileTtl);
+        }
+
+        if (profil is null) return null;
+
+        // ── Blokada se proverava TEK OVDE, IZVAN KEŠA ─────────────────────
+        //
+        // Ovo je jedina ispravna tačka. Ključ keša je samo ID profila, bez
+        // gledaoca — pa bi filtriranje unutar keširanog dela upisalo rezultat
+        // jednog korisnika i posluživalo ga svima. Konkretno: ko blokira
+        // uslugodavca prvi napuni keš praznim profilom, a svi ostali ga posle
+        // toga vide kao nepostojećeg. Tiho, i do 5 minuta.
+        //
+        // Provera je jedan indeksiran upit i radi se samo za prijavljene.
+        return await SmeDaVidiAsync(profil, viewerUserId) ? profil : null;
+    }
+
+    /// <summary>
+    /// Da li gledalac sme da vidi ovaj profil: vlasnik mora biti aktivan i ne
+    /// sme postojati blokada ni u jednom smeru.
+    /// </summary>
+    private async Task<bool> SmeDaVidiAsync(ProviderProfileDto profil, string? viewerUserId)
+    {
+        // Vlasnik uvek vidi svoj profil — inače ne bi znao šta mu se desilo
+        // sa nalogom niti mogao da ga ispravi.
+        if (viewerUserId == profil.UserId) return true;
+
+        var aktivan = await db.Users
+            .Where(u => u.Id == profil.UserId)
+            .Select(u => u.IsActive)
+            .FirstOrDefaultAsync();
+
+        if (!aktivan) return false;
+
+        if (string.IsNullOrEmpty(viewerUserId)) return true;
+
+        var blokirano = await db.UserBlocks.AnyAsync(ub =>
+            (ub.BlockerId == viewerUserId    && ub.BlockedId == profil.UserId) ||
+            (ub.BlockerId == profil.UserId   && ub.BlockedId == viewerUserId));
+
+        return !blokirano;
     }
 
     /// <summary>
@@ -214,6 +261,12 @@ public sealed class ProviderService(
         if (ext is null)
             return (null, uploadError);
 
+        // Automatska provera sadržaja. Bez listingId — cover ne pripada oglasu,
+        // pa se sumnjiva slika prijavljuje kao korisnik, ne kao oglas.
+        var (cista, moderationError) = await imageGate.ProveriAsync(file, userId, listingId: null);
+        if (!cista)
+            return (null, moderationError);
+
         var fileName  = $"cover_{profile.Id}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "covers");
         Directory.CreateDirectory(uploadDir);
@@ -234,16 +287,24 @@ public sealed class ProviderService(
     }
 
     // ── LISTINZI PROVAJDERA (javno) ────────────────────────────────────────
-    public async Task<List<ListingDto>> GetProviderListingsAsync(int providerProfileId)
+    public async Task<List<ListingDto>> GetProviderListingsAsync(
+        int providerProfileId, string? viewerUserId = null)
     {
-        var listings = await db.Listings
+        var query = db.Listings
             .AsNoTracking()
             .Include(l => l.Category)
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             .Where(l => l.ProviderProfileId == providerProfileId &&
-                        l.Status == ListingStatus.Active)
+                        l.Status == ListingStatus.Active &&
+                        l.ProviderProfile.User.IsActive);
+
+        // Zaseban endpoint od profila, pa mu treba i zasebna provera: klijent
+        // sme da pozove /api/provider/{id}/listings direktno, bez profila.
+        query = BlockService.FilterBlocked(query, db, viewerUserId);
+
+        var listings = await query
             .OrderByDescending(l => l.IsBoosted)
             .ThenByDescending(l => l.CreatedAt)
             .ToListAsync();

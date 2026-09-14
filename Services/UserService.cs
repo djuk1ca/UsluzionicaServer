@@ -14,6 +14,7 @@ public sealed class UserService(
     AppDbContext                 db,
     IWebHostEnvironment          env,
     IConfiguration               config,
+    ImageModerationGate          imageGate,
     ILogger<UserService>         logger)
 {
     // ── GET profil ─────────────────────────────────────────────────────────
@@ -57,6 +58,12 @@ public sealed class UserService(
 
         var user = await userManager.FindByIdAsync(userId);
         if (user is null) return (null, "Korisnik nije pronađen.");
+
+        // Automatska provera sadržaja. Bez listingId — avatar ne pripada
+        // oglasu, pa se sumnjiva slika prijavljuje kao korisnik.
+        var (cista, moderationError) = await imageGate.ProveriAsync(file, userId, listingId: null);
+        if (!cista)
+            return (null, moderationError);
 
         // Putanja: wwwroot/uploads/avatars/{userId}.{ext}
         var fileName  = $"{userId}{ext}";

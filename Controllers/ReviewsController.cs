@@ -44,7 +44,7 @@ public sealed class ReviewsController(ReviewService reviewService) : ControllerB
         [FromQuery] int page     = 1,
         [FromQuery] int pageSize = 20)
     {
-        var reviews = await reviewService.GetByListingAsync(id, page, pageSize);
+        var reviews = await reviewService.GetByListingAsync(id, page, pageSize, User.FindFirstValue(ClaimTypes.NameIdentifier));
         return Ok(new { success = true, data = reviews, total = reviews.Count });
     }
 
@@ -60,7 +60,7 @@ public sealed class ReviewsController(ReviewService reviewService) : ControllerB
         [FromQuery] int page     = 1,
         [FromQuery] int pageSize = 20)
     {
-        var reviews = await reviewService.GetByProviderAsync(id, page, pageSize);
+        var reviews = await reviewService.GetByProviderAsync(id, page, pageSize, User.FindFirstValue(ClaimTypes.NameIdentifier));
         return Ok(new { success = true, data = reviews, total = reviews.Count });
     }
 

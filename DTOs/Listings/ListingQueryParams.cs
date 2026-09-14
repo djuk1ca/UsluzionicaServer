@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+
 namespace UsluzionicaServer.DTOs.Listings;
 
 /// <summary>
@@ -20,6 +22,22 @@ public sealed class ListingQueryParams
 
     /// <summary>Broj rezultata po stranici. Default: 20, max: 50.</summary>
     public int PageSize         { get; set; } = 20;
+
+    /// <summary>
+    /// Ko gleda pretragu. Popunjava ga KONTROLER iz tokena — nikad klijent.
+    /// </summary>
+    /// <remarks>
+    /// <c>[BindNever]</c> je ovde bezbednosna mera, ne stil. Bez njega bi se
+    /// polje vezivalo iz query stringa kao i svako drugo, pa bi bilo dovoljno
+    /// pozvati <c>/api/listings?viewerUserId=tudji-id</c> da se vidi čiji su
+    /// oglasi kome skriveni — ili da se sopstvena blokada zaobiđe slanjem
+    /// praznog id-a.
+    ///
+    /// Null znači anoniman posetilac: on nema blokada ni u jednom smeru, pa se
+    /// filter uopšte ne primenjuje. Vidi <c>BlockService.FilterBlocked</c>.
+    /// </remarks>
+    [BindNever]
+    public string? ViewerUserId { get; set; }
 }
 
 /// <summary>

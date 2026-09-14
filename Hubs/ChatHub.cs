@@ -24,6 +24,7 @@ public sealed class ChatHub(
     MessageEncryption   encryption,
     OnlineTracker       tracker,
     NotificationService notificationService,
+    BlockService        blockService,
     ILogger<ChatHub>    logger) : Hub
 {
     // ── KONEKCIJA ──────────────────────────────────────────────────────────
@@ -139,6 +140,20 @@ public sealed class ChatHub(
 
         var sender     = conv.User1Id == senderId ? conv.User1 : conv.User2;
         var receiverId = conv.User1Id == senderId ? conv.User2Id : conv.User1Id;
+
+        // Blokada — provera MORA da stoji i ovde, nezavisno od one u
+        // ConversationService.SendMessageAsync.
+        //
+        // Hub ne poziva taj servis nego ima sopstvenu kopiju logike slanja.
+        // Da je provera samo u servisu, blokirani korisnik bi je zaobišao tako
+        // što bi poruku poslao preko SignalR-a umesto preko REST-a — dakle
+        // upravo onim putem kojim aplikacija i inače šalje poruke.
+        if (await blockService.JeBlokiranoAsync(senderId, receiverId))
+        {
+            await Clients.Caller.SendAsync(
+                "Error", "Slanje poruke ovom korisniku nije moguće.");
+            return;
+        }
 
         // Enkriptuj pre snimanja u bazu
         var encrypted = encryption.Encrypt(text.Trim());

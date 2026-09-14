@@ -20,6 +20,7 @@ public abstract class IntegrationTestBase(DatabaseFixture fixture) : IAsyncLifet
     {
         await fixture.ResetAsync();
         Email.Clear();
+        Factory.ImageModerator.Reset();
         Data = new TestData(Factory);
     }
 

@@ -20,6 +20,7 @@ public sealed class BookingService(
     AppDbContext         db,
     IConfiguration       config,
     NotificationService  notificationService,
+    BlockService         blockService,
     ILogger<BookingService> logger)
 {
     private decimal ServiceRewardTokens =>
@@ -58,6 +59,17 @@ public sealed class BookingService(
         // Korisnik ne može bookirati sopstveni listing
         if (providerUserId == clientId)
             return (null, "Ne možete poslati booking zahtev za sopstveni listing.");
+
+        // Blokada zatvara i rezervaciju.
+        //
+        // Zahtev nosi poruku i okida notifikaciju uslugodavcu, pa bi bez ove
+        // provere bio zaobilazni kanal za kontakt — tačno ono što blokada treba
+        // da spreči.
+        //
+        // Već POTVRĐENE rezervacije se namerno ne diraju: posao je dogovoren i
+        // možda plaćen, a blokada nije osnov da se ta obaveza poništi.
+        if (await blockService.JeBlokiranoAsync(clientId, providerUserId))
+            return (null, "Rezervacija kod ovog uslugodavca nije moguća.");
 
         // Nema duplikata — samo jedan aktivan zahtev po listingu
         var existingActive = await db.BookingRequests.AnyAsync(b =>

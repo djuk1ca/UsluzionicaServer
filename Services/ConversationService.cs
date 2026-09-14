@@ -14,6 +14,7 @@ public sealed class ConversationService(
     MessageEncryption            encryption,
     OnlineTracker                tracker,
     NotificationService          notificationService,
+    BlockService                 blockService,
     ILogger<ConversationService> logger)
 {
     // ── LISTA KONVERZACIJA ─────────────────────────────────────────────────
@@ -31,6 +32,23 @@ public sealed class ConversationService(
             .Where(c => c.User1Id == userId || c.User2Id == userId)
             .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .ToListAsync();
+
+        // Razgovori sa blokiranima nestaju sa liste, u oba smera.
+        //
+        // Filtrira se U MEMORIJI, a ne u upitu: lista razgovora je po prirodi
+        // kratka (desetine, ne hiljade), pa je jedan upit koji vrati sve
+        // blokirane jeftiniji od NOT EXISTS-a koji bi se izvršavao po redu.
+        // Kod pretrage oglasa je obrnuto — tamo je skup neograničen.
+        //
+        // Razgovor se NE BRIŠE, samo se ne prikazuje. Deblokiranje ga vraća sa
+        // celom istorijom; brisanje bi bilo nepovratno, a blokada nije kazna.
+        var blokirani = await blockService.SviBlokiraniAsync(userId);
+
+        if (blokirani.Count > 0)
+        {
+            conversations = [.. conversations.Where(c =>
+                !blokirani.Contains(c.User1Id == userId ? c.User2Id : c.User1Id))];
+        }
 
         // Online status za SVE sagovornike odjednom.
         // Ranije je `tracker.IsOnline(...)` pozivan unutar petlje; sa Redis-om
@@ -99,6 +117,14 @@ public sealed class ConversationService(
         var receiver = await userManager.FindByIdAsync(receiverId);
         if (receiver is null)
             return (null, "Korisnik nije pronađen.");
+
+        // Blokada u bilo kom smeru zatvara i otvaranje razgovora.
+        //
+        // Poruka je namerno ista bez obzira ko je koga blokirao. Da piše „ovaj
+        // korisnik vas je blokirao", blokada bi postala obaveštenje — a to je
+        // upravo ono što osobu koja se sklanja izlaže reakciji.
+        if (await blockService.JeBlokiranoAsync(requesterId, receiverId))
+            return (null, "Razgovor sa ovim korisnikom nije moguć.");
 
         // Normalizacija: leksikografski manji ID uvek ide kao User1
         var (user1Id, user2Id) = string.Compare(requesterId, receiverId, StringComparison.Ordinal) < 0
@@ -189,6 +215,17 @@ public sealed class ConversationService(
                                       (c.User1Id == senderId || c.User2Id == senderId));
         if (conv is null)
             return (null, "Konverzacija nije pronađena.");
+
+        // Blokada posle otvaranja razgovora.
+        //
+        // Provera u GetOrCreateAsync nije dovoljna: razgovor je mogao nastati
+        // pre blokade, a klijent i dalje drži njegov id. Bez provere baš ovde,
+        // blokirani bi nastavio da piše kroz postojeći razgovor — a to je
+        // najverovatniji razlog zbog kog je blokada i postavljena.
+        var drugiId = conv.User1Id == senderId ? conv.User2Id : conv.User1Id;
+
+        if (await blockService.JeBlokiranoAsync(senderId, drugiId))
+            return (null, "Slanje poruke ovom korisniku nije moguće.");
 
         var sender = await userManager.FindByIdAsync(senderId);
         if (sender is null) return (null, "Korisnik nije pronađen.");

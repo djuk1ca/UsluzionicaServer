@@ -105,7 +105,11 @@ public sealed class ProviderController(ProviderService providerService) : Contro
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetPublic(int id)
     {
-        var profile = await providerService.GetPublicProfileAsync(id);
+        // Blokiran ili deaktiviran profil vraća 404, isto kao nepostojeći.
+        // Poruka namerno ne razlikuje ta tri slučaja — inače bi 404 vs. 200
+        // odavalo da li te je neko blokirao.
+        var viewerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var profile  = await providerService.GetPublicProfileAsync(id, viewerId);
 
         if (profile is null)
             return NotFound(new { success = false, message = "Provajder nije pronađen." });
@@ -121,7 +125,8 @@ public sealed class ProviderController(ProviderService providerService) : Contro
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> GetListings(int id)
     {
-        var listings = await providerService.GetProviderListingsAsync(id);
+        var viewerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var listings = await providerService.GetProviderListingsAsync(id, viewerId);
         return Ok(new { success = true, data = listings, total = listings.Count });
     }
 

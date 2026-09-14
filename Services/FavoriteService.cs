@@ -94,6 +94,14 @@ public sealed class FavoriteService(
         return await db.FavoriteListings
             .AsNoTracking()
             .Where(f => f.UserId == userId)
+            // Omiljeni oglas blokiranog ili deaktiviranog korisnika se ne
+            // prikazuje. Red u tabeli OSTAJE — deblokiranje ga vraća.
+            //
+            // Ovo pokriva i početnu stranu, jer se ona gradi od omiljenih.
+            .Where(f => f.Listing.ProviderProfile.User.IsActive)
+            .Where(f => !db.UserBlocks.Any(ub =>
+                (ub.BlockerId == userId && ub.BlockedId == f.Listing.ProviderProfile.UserId) ||
+                (ub.BlockedId == userId && ub.BlockerId == f.Listing.ProviderProfile.UserId)))
             .OrderByDescending(f => f.CreatedAt)
             .Select(f => new FavoriteListingDto
             {
@@ -127,6 +135,11 @@ public sealed class FavoriteService(
         return await db.FavoriteProviders
             .AsNoTracking()
             .Where(f => f.UserId == userId)
+            // Isto pravilo kao kod omiljenih oglasa.
+            .Where(f => f.ProviderProfile.User.IsActive)
+            .Where(f => !db.UserBlocks.Any(ub =>
+                (ub.BlockerId == userId && ub.BlockedId == f.ProviderProfile.UserId) ||
+                (ub.BlockedId == userId && ub.BlockerId == f.ProviderProfile.UserId)))
             .OrderByDescending(f => f.CreatedAt)
             .Select(f => new FavoriteProviderDto
             {

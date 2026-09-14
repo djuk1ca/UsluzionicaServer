@@ -256,6 +256,28 @@ builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<TokenWalletService>();
 builder.Services.AddScoped<BoostService>();
 builder.Services.AddScoped<AdminService>();
+builder.Services.AddScoped<BlockService>();
+builder.Services.AddScoped<ReportService>();
+builder.Services.AddScoped<UserModerationService>();
+builder.Services.AddScoped<ImageModerationGate>();
+
+// ── Automatska provera slika ───────────────────────────────────────────────
+// Podrazumevano ISKLJUČENA (Noop). Uključuje se podešavanjem
+// ImageModeration:Provider = "CloudVision" i ključem u ImageModeration:ApiKey.
+//
+// Podrazumevano isključena, a ne uključena: bez ključa bi Cloud Vision svaki
+// upload slao na neuspeo poziv, a fail-open bi ga pretvarao u prijavu — pa bi
+// svaka slika u razvoju i u testovima završila u redu za moderaciju.
+var moderationProvider = builder.Configuration["ImageModeration:Provider"];
+
+if (string.Equals(moderationProvider, "CloudVision", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHttpClient<IImageModerator, CloudVisionImageModerator>();
+}
+else
+{
+    builder.Services.AddSingleton<IImageModerator, NoopImageModerator>();
+}
 
 // Singleton servisi (žive dok god živi aplikacija)
 builder.Services.AddSingleton<MessageEncryption>();
@@ -385,6 +407,8 @@ var authPermitLimit   = builder.Configuration.GetValue("RateLimit:AuthPermitLimi
 var authWindowSeconds = builder.Configuration.GetValue("RateLimit:AuthWindowSeconds", 60);
 var emailPermitLimit  = builder.Configuration.GetValue("RateLimit:EmailPermitLimit",  3);
 var emailWindowSeconds= builder.Configuration.GetValue("RateLimit:EmailWindowSeconds", 900);
+var reportPermitLimit = builder.Configuration.GetValue("RateLimit:ReportPermitLimit", 10);
+var reportWindowHours = builder.Configuration.GetValue("RateLimit:ReportWindowHours",  24);
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -410,6 +434,28 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = emailPermitLimit,
                 Window      = TimeSpan.FromSeconds(emailWindowSeconds),
+                QueueLimit  = 0
+            }));
+
+    // Prijave sadržaja.
+    //
+    // PARTICIJA JE PO KORISNIKU, NE PO IP-u — jedina takva politika ovde.
+    // Prijava traži prijavljen nalog, pa korisnik postoji i bolji je ključ:
+    // po IP-u bi ceo mobilni operater iza NAT-a delio jednu kvotu, i prvi
+    // zloupotrebljivač bi ućutkao sve ostale na toj adresi.
+    //
+    // Postoji jer je sistem prijava i sam vektor napada: bez ograničenja jedan
+    // nalog zasipa red lažnim prijavama konkurencije i zakloni stvarne prekršaje.
+    options.AddPolicy("reports", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirst(
+                              System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = reportPermitLimit,
+                Window      = TimeSpan.FromHours(reportWindowHours),
                 QueueLimit  = 0
             }));
 
