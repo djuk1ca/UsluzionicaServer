@@ -411,3 +411,19 @@ appsettings.*.Local.json
 # DocFX generated output
 _site/
 apidoc/
+
+# ── Korisnički otpremljeni fajlovi ─────────────────────────────────────────
+# Server lokalno piše u IZVORNO stablo: ListingService koristi
+# `env.WebRootPath`, što pri `dotnet run` pokazuje na wwwroot/ u folderu
+# projekta. Svaki test uploada zato pravi fajl pored koda, a `git add -A` ga
+# pokupi. Tako je 28 slika i završilo u javnom repou.
+#
+# U produkciji ovo ne postoji — compose montira imenovani volumen na
+# /app/wwwroot/uploads, pa produkcijske slike nikad ne dodiruju repo.
+#
+# Folderi se čuvaju praznim `.gitkeep` fajlovima: `WebRootPath` je null ako
+# wwwroot ne postoji, pa bi prvi upload pukao na svežem kloniranju.
+wwwroot/uploads/**
+!wwwroot/uploads/
+!wwwroot/uploads/*/
+!wwwroot/uploads/**/.gitkeep
