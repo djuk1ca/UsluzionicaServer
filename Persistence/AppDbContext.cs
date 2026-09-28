@@ -30,6 +30,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<FavoriteProvider>    FavoriteProviders    => Set<FavoriteProvider>();
     public DbSet<Report>              Reports              => Set<Report>();
     public DbSet<UserBlock>           UserBlocks           => Set<UserBlock>();
+    public DbSet<DeviceToken>         DeviceTokens         => Set<DeviceToken>();
 
     // ── Održavanje indeksa za pretragu ─────────────────────────────────────
     // Presreće SVAKI upis i osvežava Search* kolone pre nego što odu u bazu.
@@ -751,5 +752,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
                .Property(l => l.ModerationState)
                .HasConversion<string>()
                .HasMaxLength(16);
+
+        // ── DeviceToken ────────────────────────────────────────────────────
+        builder.Entity<DeviceToken>(e =>
+        {
+            e.Property(d => d.Token).HasMaxLength(255).IsRequired();
+            e.Property(d => d.Platform).HasMaxLength(16).IsRequired();
+
+            // JEDINSTVEN TOKEN — vidi obrazloženje uz entitet.
+            //
+            // Ukratko: jedan uređaj daje jedan FCM token bez obzira ko je na
+            // njemu prijavljen. Bez ovog indeksa bi odjava jednog i prijava
+            // drugog korisnika na istom telefonu napravila dva reda sa istim
+            // tokenom — i prethodni korisnik bi dobijao tuđe poruke, sa imenom
+            // pošiljaoca i tekstom u telu obaveštenja.
+            e.HasIndex(d => d.Token).IsUnique();
+
+            // Slanje uvek kreće od „svi tokeni ovog korisnika".
+            e.HasIndex(d => d.UserId);
+
+            e.HasOne(d => d.User)
+             .WithMany()
+             .HasForeignKey(d => d.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
     }
 }

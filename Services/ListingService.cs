@@ -390,13 +390,47 @@ public sealed class ListingService(
             .Take(p.PageSize)
             .ToListAsync();
 
+        var dtos = items.Select(MapToDto).ToList();
+        await StampFavoritesAsync(dtos, p.ViewerUserId);
+
         return new PagedResult<ListingDto>
         {
-            Items    = items.Select(MapToDto).ToList(),
+            Items    = dtos,
             Total    = total,
             Page     = p.Page,
             PageSize = p.PageSize
         };
+    }
+
+    /// <summary>
+    /// Upisuje <c>IsFavorited</c> na već mapirane oglase, JEDNIM upitom po
+    /// stranici.
+    ///
+    /// Alternativa je bila da svaka kartica u aplikaciji sama zove
+    /// <c>GET /api/favorites/listings/{id}/status</c> — za stranicu od 20
+    /// rezultata to je 20 dodatnih poziva preko mobilne mreže, za podatak koji
+    /// se dobija uz onaj koji se ionako povlači.
+    ///
+    /// Ne radi se unutar <c>MapToDto</c> jer je taj metod statičan i čist;
+    /// upit u njemu bi značio odlazak u bazu po svakom redu.
+    /// </summary>
+    private async Task StampFavoritesAsync(List<ListingDto> dtos, string? viewerId)
+    {
+        if (string.IsNullOrEmpty(viewerId) || dtos.Count == 0) return;
+
+        var ids = dtos.Select(d => d.Id).ToList();
+
+        var omiljeni = await db.FavoriteListings
+            .AsNoTracking()
+            .Where(f => f.UserId == viewerId && ids.Contains(f.ListingId))
+            .Select(f => f.ListingId)
+            .ToListAsync();
+
+        if (omiljeni.Count == 0) return;
+
+        var skup = omiljeni.ToHashSet();
+        foreach (var d in dtos)
+            d.IsFavorited = skup.Contains(d.Id);
     }
 
     // ── GET BY ID (javno, uvećava ViewCount) ───────────────────────────────
