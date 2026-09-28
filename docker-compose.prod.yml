@@ -94,6 +94,21 @@ services:
       Booking__ServiceRewardTokens: ${BOOKING_SERVICE_REWARD:-5}
       Booking__ProviderRewardTokens: ${BOOKING_PROVIDER_REWARD:-3}
 
+      # ── PUSH NOTIFIKACIJE ────────────────────────────────────────────────
+      # Service account kljuc iz Firebase konzole, kao JEDAN RED JSON-a.
+      #
+      # Prazno je DOZVOLJENO — tada se koristi NoopPushSender i aplikacija radi
+      # normalno, samo bez push-a. Nije u SecretsGuard-u iz istog razloga:
+      # izostanak notifikacija ne sme da obori server.
+      #
+      # Kljuc je tajna ravna lozinci: ko ga ima moze slati notifikacije svim
+      # korisnicima u ime aplikacije.
+      Firebase__ServiceAccountJson: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+
+    volumes:
+      # Serilog file sink pise ovde — vidi Program.cs.
+      - logs:/app/logs
+
     # BEZ IJEDNOG PORTA NA HOSTU.
     #
     # Osnovni fajl mapira "8080:8080", što bi na serveru sa javnom IP adresom
@@ -156,6 +171,13 @@ services:
 
 # Volumeni za Caddy. Osnovni fajl ih nema jer Caddy tamo i ne postoji.
 volumes:
+  # Trajni logovi aplikacije (Serilog file sink, /app/logs).
+  #
+  # BEZ OVOGA JE CEO FILE SINK BESMISLEN: zapis u kontejner bez volumena
+  # nestaje pri `up -d --force-recreate`, dakle pri svakom deploy-u. To je isti
+  # problem zbog kog je i uveden, samo bolje sakriven.
+  logs:
+
   caddy-data:      # sertifikati i ACME nalog — NE brisati, vidi komentar gore
   caddy-config:
   caddy-logs:

@@ -16,6 +16,11 @@ public sealed class ListingDto
     public ListingStatus Status          { get; set; }
     public int          ViewCount        { get; set; }
     public bool         IsBoosted        { get; set; }
+
+    /// <summary>Da li je oglas u omiljenima PRIJAVLJENOG korisnika.
+    /// Stize uz sam oglas, jednim upitom po stranici — vidi
+    /// ListingService.StampFavoritesAsync.</summary>
+    public bool         IsFavorited      { get; set; }
     public DateTime     CreatedAt        { get; set; }
     public DateTime     UpdatedAt        { get; set; }
 

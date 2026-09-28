@@ -4,6 +4,7 @@ using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Notifications;
 using UsluzionicaServer.Hubs;
+using UsluzionicaServer.Infrastructure.Push;
 using UsluzionicaServer.Persistence;
 
 namespace UsluzionicaServer.Services;
@@ -20,6 +21,7 @@ namespace UsluzionicaServer.Services;
 public sealed class NotificationService(
     AppDbContext                       db,
     IHubContext<NotificationHub>       hubContext,
+    IPushSender                        pushSender,
     ILogger<NotificationService>       logger)
 {
     // ── SEND ───────────────────────────────────────────────────────────────
@@ -60,6 +62,51 @@ public sealed class NotificationService(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "SignalR push za notifikaciju {Id} nije uspeo (korisnik {UserId})", notif.Id, userId);
+        }
+
+        // ── PUSH NA UREĐAJE ─────────────────────────────────────────────────
+        // SignalR iznad pokriva samo aplikaciju u PRVOM PLANU — konekcija umire
+        // čim korisnik izađe iz nje. Push je jedini kanal koji radi kad je
+        // aplikacija u pozadini ili ugašena.
+        //
+        // Naslov i telo se ne grade ovde nego stižu gotovi od pozivaoca, pa
+        // obaveštenje na zaključanom ekranu piše isto što i lista u aplikaciji:
+        // koliko tokena, ko šalje poruku i šta u njoj piše.
+        //
+        // FAIL-OPEN, isto pravilo kao SignalR grana. Pad FCM-a ne sme da obori
+        // rezervaciju, poruku ni recenziju — notifikacija je već u bazi i
+        // stići će kroz GET /api/notifications.
+        try
+        {
+            var tokeni = await db.DeviceTokens
+                .Where(t => t.UserId == userId)
+                .Select(t => t.Token)
+                .ToListAsync();
+
+            if (tokeni.Count > 0)
+            {
+                var mrtvi = (await pushSender.SendAsync(
+                    tokeni,
+                    new PushMessage(notif.Id, kind.ToString(), title, body, referenceId))).ToList();
+
+                // Tokene koje je FCM odbio kao nepostojeće brišemo odmah.
+                // Bez toga tabela raste zauvek, a svako slanje čeka i na uređaje
+                // kojih odavno nema — što usporava isporuku svima ostalima.
+                if (mrtvi.Count > 0)
+                {
+                    await db.DeviceTokens
+                        .Where(t => mrtvi.Contains(t.Token))
+                        .ExecuteDeleteAsync();
+
+                    logger.LogInformation(
+                        "Obrisano {Count} mrtvih FCM tokena korisnika {UserId}.", mrtvi.Count, userId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Push za notifikaciju {Id} nije uspeo (korisnik {UserId})", notif.Id, userId);
         }
     }
 
@@ -112,6 +159,67 @@ public sealed class NotificationService(
         await db.Notifications
             .Where(n => n.UserId == userId && !n.IsRead)
             .ExecuteUpdateAsync(s => s.SetProperty(n => n.IsRead, true));
+
+    // ── UREĐAJI ────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Prijavljuje uređaj za push, ili ga PREUZIMA od prethodnog korisnika.
+    ///
+    /// Nije „dodaj" nego „preuzmi", i to je suština. Jedan uređaj daje jedan FCM
+    /// token — on pripada instalaciji aplikacije, ne nalogu. Kad se na istom
+    /// telefonu odjavi Marko i prijavi Ana, Firebase vraća isti token.
+    ///
+    /// Da se ovde radio prost <c>Add</c>, jedinstveni indeks bi to odbio, a da
+    /// indeksa nema, Marko bi nastavio da prima Anine poruke — sa imenom
+    /// pošiljaoca i tekstom u telu obaveštenja. Zato se red pronađe po tokenu i
+    /// vlasnik se prepiše.
+    /// </summary>
+    public async Task RegisterDeviceAsync(string userId, string token, string platform)
+    {
+        var sada = DateTime.UtcNow;
+
+        var postojeci = await db.DeviceTokens.FirstOrDefaultAsync(t => t.Token == token);
+
+        if (postojeci is not null)
+        {
+            postojeci.UserId     = userId;
+            postojeci.Platform   = platform;
+            postojeci.LastSeenAt = sada;
+        }
+        else
+        {
+            db.DeviceTokens.Add(new DeviceToken
+            {
+                UserId     = userId,
+                Token      = token,
+                Platform   = platform,
+                CreatedAt  = sada,
+                LastSeenAt = sada
+            });
+        }
+
+        try
+        {
+            await db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            // Dva istovremena zahteva sa istim tokenom — jedan je prošao, i to
+            // je jedino što je bilo važno. Klijent svakako ponavlja prijavu pri
+            // svakom pokretanju.
+        }
+    }
+
+    /// <summary>
+    /// Odjavljuje uređaj. Zove se pri odjavi korisnika, PRE brisanja JWT-a —
+    /// bez tokena zahtev ne bi prošao autorizaciju.
+    ///
+    /// Briše se po paru (token, korisnik): tuđi token se ne dira ni ako neko
+    /// pogodi njegovu vrednost.
+    /// </summary>
+    public async Task UnregisterDeviceAsync(string userId, string token) =>
+        await db.DeviceTokens
+            .Where(t => t.Token == token && t.UserId == userId)
+            .ExecuteDeleteAsync();
 
     // ── HELPER ─────────────────────────────────────────────────────────────
     private static NotificationDto MapToDto(Notification n) => new()

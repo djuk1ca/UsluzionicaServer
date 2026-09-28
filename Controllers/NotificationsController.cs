@@ -62,4 +62,40 @@ public sealed class NotificationsController(NotificationService notificationServ
         await notificationService.MarkAllReadAsync(userId);
         return Ok(new { success = true });
     }
+
+    // ── POST /api/notifications/device ────────────────────────────────────
+    /// <summary>
+    /// Prijavljuje uređaj za push notifikacije.
+    ///
+    /// Klijent ovo zove posle svake prijave i pri svakom osvežavanju FCM tokena
+    /// — token ume da se promeni sam od sebe, pri ažuriranju aplikacije ili
+    /// vraćanju podataka na nov telefon.
+    /// </summary>
+    [HttpPost("device")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RegisterDevice([FromBody] RegisterDeviceDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        await notificationService.RegisterDeviceAsync(userId, dto.Token, dto.Platform);
+        return Ok(new { success = true });
+    }
+
+    // ── DELETE /api/notifications/device ──────────────────────────────────
+    /// <summary>
+    /// Odjavljuje uređaj. Zove se pri odjavi korisnika.
+    ///
+    /// MORA da se pozove PRE brisanja JWT-a na klijentu — endpoint traži
+    /// autorizaciju, pa bi posle brisanja tokena vratio 401 i uređaj bi ostao
+    /// prijavljen. Zato poziv stoji u <c>ApiClient.LogoutAsync</c>, koje je
+    /// jedina tačka kroz koju odjava prolazi.
+    /// </summary>
+    [HttpDelete("device")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> UnregisterDevice([FromBody] UnregisterDeviceDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        await notificationService.UnregisterDeviceAsync(userId, dto.Token);
+        return Ok(new { success = true });
+    }
 }

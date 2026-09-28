@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Diagnostics;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -11,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
+using UsluzionicaServer.Infrastructure.Push;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Hubs;
 using UsluzionicaServer.Infrastructure;
@@ -45,10 +47,30 @@ if (args.Length > 0)
 
 // Padne odmah, sa jasnom porukom, ako neka obavezna tajna nedostaje.
 SecretsGuard.Validate(builder.Configuration, builder.Environment);
-
+// ── Serilog ────────────────────────────────────────────────────────────────
+// Konzola OSTAJE — `docker compose logs` je i dalje najbrži put kad si ionako
+// na serveru. Fajl se dodaje jer konzola živi koliko i kontejner: posle
+// `up -d --force-recreate` (dakle posle svakog deploy-a) istorije nema.
+//
+// To je bilo bolno kod BUG-003: kvar se desio oko 20h, a jedini način da se
+// sazna šta se desilo bio je SSH i ručno prosejavanje.
+//
+// Putanja je /app/logs, koja u produkciji mora biti imenovani volumen —
+// vidi docker-compose.prod.yml. Bez volumena fajl nestaje isto kao i konzola,
+// samo manje očigledno.
 builder.Host.UseSerilog((ctx, cfg) => cfg
     .ReadFrom.Configuration(ctx.Configuration)
-    .WriteTo.Console());
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.File(
+        path:                   "/app/logs/usluzionica-.log",
+        rollingInterval:        RollingInterval.Day,
+        retainedFileCountLimit: 14,
+        // Zapis nosi i TraceId, pa se jedan korisnički potez može pratiti kroz
+        // sve pozive koje je napravio.
+        outputTemplate:
+            "{Timestamp:yyyy-MM-dd HH:mm:ss.fff} [{Level:u3}] "
+            + "{TraceId} {UserId} {Message:lj}{NewLine}{Exception}"));
 
 // ── EF Core + SQL Server ───────────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -260,6 +282,29 @@ builder.Services.AddScoped<BlockService>();
 builder.Services.AddScoped<ReportService>();
 builder.Services.AddScoped<UserModerationService>();
 builder.Services.AddScoped<ImageModerationGate>();
+
+// ── Push notifikacije (FCM) ────────────────────────────────────────────────
+// Isti obrazac kao automatska provera slika ispod: prava implementacija kad je
+// ključ podešen, prazna kad nije.
+//
+// Bez ovoga bi svaki razvojni start tražio produkcijski Firebase ključ, a
+// integracioni testovi bi zavisili od mreže.
+//
+// SINGLETON je obavezan: `FirebaseApp.Create` sme tačno jednom po procesu.
+// Zato `IPushSender` i ne sme da drži `AppDbContext` (scoped) — brisanje mrtvih
+// tokena radi `NotificationService`, koji kontekst ionako ima.
+var firebaseKljuc = builder.Configuration["Firebase:ServiceAccountJson"];
+
+if (!string.IsNullOrWhiteSpace(firebaseKljuc))
+{
+    builder.Services.AddSingleton<IPushSender>(sp => new FirebasePushSender(
+        firebaseKljuc,
+        sp.GetRequiredService<ILogger<FirebasePushSender>>()));
+}
+else
+{
+    builder.Services.AddSingleton<IPushSender, NoopPushSender>();
+}
 
 // ── Automatska provera slika ───────────────────────────────────────────────
 // Podrazumevano ISKLJUČENA (Noop). Uključuje se podešavanjem
@@ -534,7 +579,33 @@ forwardedHeaders.KnownProxies.Clear();
 
 app.UseForwardedHeaders(forwardedHeaders);
 
-app.UseSerilogRequestLogging();
+// Zapis zahteva nosi KO ga je poslao i KOJOJ radnji pripada.
+//
+// Bez `UserId` se kod BUG-003 iz logova videlo samo `PUT /api/listings/5 404`.
+// Da li je korisnik bio vlasnik, da li je oglas bio arhiviran — ništa od toga.
+// Uzrok je na kraju utvrđen merenjem DUŽINE TELA zahteva (19 naspram 21 bajta,
+// „Paused" naspram „Archived"). To je bila sreća, ne metod.
+//
+// `TraceId` povezuje pozive jedne radnje: „objavi oglas" je POST /listings pa
+// POST /{id}/images po slici. Bez zajedničke oznake se iz loga ne vidi da
+// pripadaju istom potezu.
+//
+// MORA stajati POSLE UseForwardedHeaders — inače je IP svakog zahteva adresa
+// Caddy-ja. Isti razlog zbog kog je rate limiting jednom brojao sve korisnike
+// kao jednog.
+app.UseSerilogRequestLogging(opts =>
+{
+    opts.EnrichDiagnosticContext = (ctx, http) =>
+    {
+        // Prazan string, a ne null: Serilog izostavlja svojstvo bez vrednosti,
+        // pa bi se kolone u ispisu pomerile i `grep` po poziciji bi lagao.
+        ctx.Set("UserId",
+            http.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "-");
+
+        ctx.Set("TraceId", Activity.Current?.TraceId.ToString() ?? "-");
+        ctx.Set("IP",      http.Connection.RemoteIpAddress?.ToString() ?? "-");
+    };
+});
 
 if (app.Environment.IsDevelopment())
 {
