@@ -138,8 +138,13 @@ public sealed class AuthService(
         var response = await IssueTokensAsync(user);
 
         // IP ostaje u logu radi praćenja sumnjivih prijava — ne šalje se nikome.
-        logger.LogInformation("Korisnik se prijavio: {Email} | IP: {IP}",
-            req.Email, ipAddress);
+        //
+        // Id iz baze, a ne mejl iz zahteva. Tekst iz zahteva u logu omogućava
+        // lažiranje zapisa (novi red u „mejlu" izgleda kao nov log unos), a
+        // mejl je lični podatak koji log ne mora da nosi — id je dovoljan za
+        // praćenje, a do mejla se dolazi kroz bazu.
+        logger.LogInformation("Korisnik se prijavio: {UserId} | IP: {IP}",
+            user.Id, ipAddress);
 
         return (response, null);
     }
@@ -221,7 +226,9 @@ public sealed class AuthService(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Referral kod '{Code}' nije mogao biti obrađen.", referralCode);
+            // Bez samog koda u logu — upisao ga je korisnik, pa bi mogao da
+            // nosi znake koji lažiraju log zapis. Id je dovoljan da se nađe.
+            logger.LogWarning(ex, "Referral za korisnika {UserId} nije mogao biti obrađen.", user.Id);
         }
     }
 

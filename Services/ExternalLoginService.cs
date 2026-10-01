@@ -159,7 +159,8 @@ public sealed class ExternalLoginService(
         // verifikacioni link. Ovde je mejl već potvrđen, pa ide odmah.
         await referralService.TryRewardSignupAsync(user.Id);
 
-        logger.LogInformation("Novi korisnik registrovan preko {Provider}: {Email}", id.Provider, id.Email);
+        // Id, ne mejl — lični podatak ne pripada logu.
+        logger.LogInformation("Novi korisnik {UserId} registrovan preko {Provider}.", user.Id, id.Provider);
 
         return (user, null);
     }

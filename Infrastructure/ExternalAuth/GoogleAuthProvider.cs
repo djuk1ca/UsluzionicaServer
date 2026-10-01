@@ -34,17 +34,16 @@ public sealed class GoogleAuthProvider(HttpClient http, IConfiguration config) :
     public async Task<ExternalIdentity> ExchangeCodeAsync(
         string code, string redirectUri, CancellationToken ct)
     {
-        using var tokenResp = await http.PostAsync(
-            "https://oauth2.googleapis.com/token",
-            new FormUrlEncodedContent(new Dictionary<string, string>
-            {
-                ["code"]          = code,
-                ["client_id"]     = ClientId,
-                ["client_secret"] = ClientSecret,
-                ["redirect_uri"]  = redirectUri,
-                ["grant_type"]    = "authorization_code"
-            }),
-            ct);
+        using var forma = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["code"]          = code,
+            ["client_id"]     = ClientId,
+            ["client_secret"] = ClientSecret,
+            ["redirect_uri"]  = redirectUri,
+            ["grant_type"]    = "authorization_code"
+        });
+
+        using var tokenResp = await http.PostAsync("https://oauth2.googleapis.com/token", forma, ct);
 
         if (!tokenResp.IsSuccessStatusCode)
             throw new ExternalAuthException(
