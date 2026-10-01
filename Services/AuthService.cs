@@ -59,31 +59,7 @@ public sealed class AuthService(
         await userManager.AddToRoleAsync(user, "User");
 
         // 5. Ako je prosleđen referral kod — pronađi referrera i snimi pending zapis
-        //    Greška u ovom koraku ne sme blokirati registraciju → catch i log
-        if (!string.IsNullOrWhiteSpace(req.ReferralCode))
-        {
-            try
-            {
-                var referrer = await db.Users
-                    .FirstOrDefaultAsync(u => u.ReferralCode == req.ReferralCode);
-
-                if (referrer is not null && referrer.Id != user.Id)
-                {
-                    db.Referrals.Add(new Referral
-                    {
-                        ReferrerId     = referrer.Id,
-                        ReferredUserId = user.Id,
-                        ReferralCode   = req.ReferralCode
-                        // Status = Pending (default)
-                    });
-                    await db.SaveChangesAsync();
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex, "Referral kod '{Code}' nije mogao biti obrađen.", req.ReferralCode);
-            }
-        }
+        await SacuvajReferralAsync(user, req.ReferralCode);
 
         // 6. Generiši email verifikacioni token i pošalji email
         //    UserManager.GenerateEmailConfirmationTokenAsync() vraća kriptografski token
@@ -158,12 +134,32 @@ public sealed class AuthService(
         //
         // Grad sada bira korisnik: pri registraciji, i kasnije u profilu.
 
-        // 4. Generiši JWT access token
+        // 4–5. JWT + refresh token
+        var response = await IssueTokensAsync(user);
+
+        // IP ostaje u logu radi praćenja sumnjivih prijava — ne šalje se nikome.
+        logger.LogInformation("Korisnik se prijavio: {Email} | IP: {IP}",
+            req.Email, ipAddress);
+
+        return (response, null);
+    }
+
+    // ── IZDAVANJE TOKENA ───────────────────────────────────────────────────
+    /// <summary>
+    /// Izdaje JWT i refresh token korisniku koji je VEĆ prošao sve provere
+    /// (lozinka, aktivnost naloga, potvrda emaila).
+    ///
+    /// Jedno mesto za prijavu lozinkom i za prijavu preko Google-a i Facebook-a.
+    /// Da svaki tok sam sklapa odgovor, prvo polje dodato u <see cref="UserDto"/>
+    /// stiglo bi samo u jedan od njih — a klijent bi posle prijave preko
+    /// Facebook-a video nalog bez podatka koji ima posle prijave lozinkom.
+    /// </summary>
+    public async Task<AuthResponse> IssueTokensAsync(ApplicationUser user)
+    {
         var roles       = await userManager.GetRolesAsync(user);
         var accessToken = tokenService.GenerateAccessToken(user, roles);
 
-        // 5. Generiši refresh token i snimi ga u bazu
-        //    Stari aktivni refresh tokeni ostaju (podržavamo više uređaja)
+        // Stari aktivni refresh tokeni ostaju (podržavamo više uređaja)
         var refreshTokenValue = TokenService.GenerateRefreshToken();
         var refreshExpDays    = int.Parse(config["Jwt:RefreshTokenExpirationDays"] ?? "30");
 
@@ -176,11 +172,7 @@ public sealed class AuthService(
 
         await db.SaveChangesAsync();
 
-        // IP ostaje u logu radi praćenja sumnjivih prijava — ne šalje se nikome.
-        logger.LogInformation("Korisnik se prijavio: {Email} | IP: {IP}",
-            req.Email, ipAddress);
-
-        return (new AuthResponse
+        return new AuthResponse
         {
             AccessToken  = accessToken,
             RefreshToken = refreshTokenValue,
@@ -196,7 +188,41 @@ public sealed class AuthService(
                 LastKnownCity = user.LastKnownCity,
                 ReferralCode  = user.ReferralCode
             }
-        }, null);
+        };
+    }
+
+    // ── REFERRAL PRI REGISTRACIJI ──────────────────────────────────────────
+    /// <summary>
+    /// Upisuje pending referral za tek napravljen nalog.
+    ///
+    /// Greška ovde NE SME oboriti registraciju — nalog je već napravljen, a
+    /// korisnik koji je upisao pogrešan kod ne treba da ostane bez naloga.
+    /// </summary>
+    public async Task SacuvajReferralAsync(ApplicationUser user, string? referralCode)
+    {
+        if (string.IsNullOrWhiteSpace(referralCode)) return;
+
+        try
+        {
+            var referrer = await db.Users
+                .FirstOrDefaultAsync(u => u.ReferralCode == referralCode);
+
+            if (referrer is not null && referrer.Id != user.Id)
+            {
+                db.Referrals.Add(new Referral
+                {
+                    ReferrerId     = referrer.Id,
+                    ReferredUserId = user.Id,
+                    ReferralCode   = referralCode
+                    // Status = Pending (default)
+                });
+                await db.SaveChangesAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Referral kod '{Code}' nije mogao biti obrađen.", referralCode);
+        }
     }
 
     // ── REFRESH ────────────────────────────────────────────────────────────
