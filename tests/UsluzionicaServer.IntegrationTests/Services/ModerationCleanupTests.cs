@@ -134,20 +134,24 @@ public class ModerationCleanupTests(DatabaseFixture fixture) : IntegrationTestBa
     }
 
     [Fact]
-    public async Task Deaktivacija_SklanjaOglasIVlasniku()
+    public async Task Deaktivacija_SklanjaOglasIzPrometa_AliVlasnikuOstajeUArhivi()
     {
-        // BELEŽI POSTOJEĆE PONAŠANJE, uz poznato ograničenje.
+        // Deaktivacija naloga arhivira oglase. Posle toga:
         //
-        // Arhiviran oglas ne vidi NIKO, ni vlasnik — ni preko detalja
-        // (GetByIdAsync), ni u „Mojim oglasima" (GetByProviderAsync). Oba
-        // filtriraju `Status != Archived`, i to je zatečeno ponašanje aplikacije,
-        // starije od moderacije.
+        //   • javno ih NEMA          — GetByIdAsync filtrira Archived
+        //   • vlasniku su u ARHIVI   — GetByProviderAsync ih vraća
         //
-        // POSLEDICA KOJU TREBA ZNATI: vraćanje naloga (VratiAsync) ne vraća
-        // oglase, a vlasnik ih posle toga ne može ni videti ni sam obnoviti.
-        // Da bi se to rešilo, trebalo bi zabeležiti KOJE je oglase arhivirala
-        // baš deaktivacija — inače se pri vraćanju ne razlikuju od onih koje je
-        // vlasnik sam sklonio ranije. Namerno nije rađeno u ovom koraku.
+        // Drugi red je promenjen. Ranije ih vlasnik nije video nigde, pa oglas
+        // posle vraćanja naloga nije mogao ni da pronađe ni da obnovi — što je
+        // stari komentar ovde i beležio kao poznato ograničenje.
+        //
+        // Dok je nalog deaktiviran ovo ništa ne otvara: `IsActive` se proverava
+        // na svakom zahtevu, pa korisnik do API-ja i ne dolazi. Tek kad mu se
+        // nalog vrati, oglasi ga čekaju u arhivi i sam bira šta da obnovi.
+        //
+        // Oglasi koje je UKLONIO ADMIN se ovako ne ponašaju — oni nose
+        // ModerationState.Removed i ostaju nevidljivi i vlasniku. Vidi
+        // UklanjanjeOglasa_OstajeNevidljivoIVlasniku.
         var (majstorId, oglasId) = await PostaviAsync();
 
         await WithService<UserModerationService>(svc => svc.DeaktivirajAsync(majstorId));
@@ -158,8 +162,13 @@ public class ModerationCleanupTests(DatabaseFixture fixture) : IntegrationTestBa
         var moji = await WithService<ListingService, List<ListingDto>>(
             svc => svc.GetByProviderAsync(majstorId));
 
-        detalji.Should().BeNull();
-        moji.Should().NotContain(l => l.Id == oglasId);
+        detalji.Should().BeNull("javno oglasa nema");
+
+        moji.Should().Contain(l => l.Id == oglasId,
+            "vlasnik mora da vidi svoje arhivirane oglase, inače ih ne može vratiti");
+
+        moji.Single(l => l.Id == oglasId).Status
+            .Should().Be(ListingStatus.Archived);
     }
 
     [Fact]
@@ -203,5 +212,57 @@ public class ModerationCleanupTests(DatabaseFixture fixture) : IntegrationTestBa
         var oglas = await Query(db => db.Listings.SingleAsync(l => l.Id == oglasId));
         oglas.Status.Should().Be(ListingStatus.Archived,
             "vlasnik sam vraća svoje oglase, kroz „Moje oglase\"");
+    }
+
+    // ── Uklonjeno odlukom admina ≠ vlasnik sam arhivirao ────────────────────
+
+    [Fact]
+    public async Task UklanjanjeOglasa_OstajeNevidljivoIVlasniku()
+    {
+        // OVO JE GRANICA KOJA DELI DVA ZNAČENJA ISTOG STATUSA.
+        //
+        // `Archived` nose i oglasi koje je vlasnik sam sklonio i oni koje je
+        // admin uklonio zbog prijave. Otkako vlasnik vidi svoju arhivu i može
+        // da vrati oglas u aktivne, ta razlika više nije kozmetička — bez nje
+        // bi uklonjen oglas bio vraćen jednim dodirom i moderacija bi postala
+        // predlog.
+        //
+        // Razlikuje ih ModerationState.Removed.
+        var (majstorId, oglasId) = await PostaviAsync();
+
+        await Query(db => db.Listings
+            .Where(l => l.Id == oglasId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(l => l.Status,          ListingStatus.Archived)
+                .SetProperty(l => l.ModerationState, ModerationState.Removed)));
+
+        var moji = await WithService<ListingService, List<ListingDto>>(
+            svc => svc.GetByProviderAsync(majstorId));
+
+        moji.Should().NotContain(l => l.Id == oglasId,
+            "uklonjen oglas se ne prikazuje ni vlasniku");
+    }
+
+    [Fact]
+    public async Task UklonjenOglas_NeMozeDaSeVratiUAktivne()
+    {
+        // Lista koja ga ne prikazuje NIJE zaštita — zaštita je u servisu.
+        // Bez ove provere bi direktan poziv API-ja zaobišao moderaciju.
+        var (majstorId, oglasId) = await PostaviAsync();
+
+        await Query(db => db.Listings
+            .Where(l => l.Id == oglasId)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(l => l.Status,          ListingStatus.Archived)
+                .SetProperty(l => l.ModerationState, ModerationState.Removed)));
+
+        var (uspeh, greska) = await WithService<ListingService, (bool, string?)>(
+            svc => svc.UpdateStatusAsync(oglasId, majstorId, "Active"));
+
+        uspeh.Should().BeFalse();
+        greska.Should().Contain("uklonjen");
+
+        var oglas = await Query(db => db.Listings.SingleAsync(l => l.Id == oglasId));
+        oglas.Status.Should().Be(ListingStatus.Archived, "status se nije promenio");
     }
 }

@@ -155,6 +155,32 @@ public sealed class ListingsController(
         return Ok(new { success = true, message = "Listing arhiviran." });
     }
 
+    // ── DELETE /api/listings/{id}/permanent ───────────────────────────────
+    /// <summary>
+    /// Trajno briše oglas iz baze. Nepovratno. Samo vlasnik, i samo iz arhive.
+    ///
+    /// Odvojena putanja od <c>DELETE /{id}</c>, koje samo arhivira. Da je jedna
+    /// ruta radila oboje u zavisnosti od stanja, isti dodir bi nekad sklanjao a
+    /// nekad nepovratno brisao — razlika koju korisnik ne vidi unapred.
+    ///
+    /// Vraća <c>400</c>, ne <c>404</c>, kad oglas ima istoriju: oglas postoji,
+    /// radnja nad njim nije dozvoljena. Poruka objašnjava zašto.
+    /// </summary>
+    [Authorize]
+    [HttpDelete("{id:int}/permanent")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> DeletePermanent(int id)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var (success, error) = await listingService.DeletePermanentlyAsync(id, userId);
+
+        if (!success)
+            return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, message = "Oglas je trajno obrisan." });
+    }
+
     // ── POST /api/listings/{id}/images ────────────────────────────────────
     /// <summary>
     /// Dodaje sliku na listing (multipart/form-data, polje "file").
