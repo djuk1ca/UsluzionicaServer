@@ -17,6 +17,20 @@ public sealed class ListingDto
     public int          ViewCount        { get; set; }
     public bool         IsBoosted        { get; set; }
 
+    /// <summary>
+    /// Redosled isticanja: što je veći, oglas je više u pretrazi i na početnoj.
+    ///
+    /// Do sada se slao samo <see cref="IsBoosted"/>, pa je klijent znao DA je
+    /// oglas istaknut, ali ne i KOLIKO. Broj je javan namerno — to je cena koju
+    /// je izvođač platio za mesto, ne ocena kvaliteta usluge, i tako se i
+    /// objašnjava na stranici oglasa.
+    /// </summary>
+    public decimal      BoostScore       { get; set; }
+
+    /// <summary>Kad boost ističe. Vlasniku služi za „ističe za 6 h" i dugme
+    /// „Produži"; posetiocu se ne prikazuje, jer ga rok ne zanima.</summary>
+    public DateTime?    BoostExpiresAt   { get; set; }
+
     /// <summary>Da li je oglas u omiljenima PRIJAVLJENOG korisnika.
     /// Stize uz sam oglas, jednim upitom po stranici — vidi
     /// ListingService.StampFavoritesAsync.</summary>

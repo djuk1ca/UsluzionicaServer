@@ -774,6 +774,8 @@ public sealed class ListingService(
         Status       = l.Status,
         ViewCount    = l.ViewCount,
         IsBoosted    = l.IsBoosted,
+        BoostScore    = l.BoostScore,
+        BoostExpiresAt = l.BoostExpiresAt,
         CreatedAt    = l.CreatedAt,
         UpdatedAt    = l.UpdatedAt,
         CategoryId   = l.CategoryId,
