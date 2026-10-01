@@ -105,6 +105,16 @@ services:
       # korisnicima u ime aplikacije.
       Firebase__ServiceAccountJson: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
 
+      # ── PRIJAVA PREKO FACEBOOK-A I GOOGLE-A ──────────────────────────────
+      # Prazno je DOZVOLJENO — provajder je tada isključen, a prijava lozinkom
+      # radi normalno. Isti razlog kao za FCM: nepodešena prijava ne sme da
+      # obori server.
+      #
+      # Facebook AppId je u appsettings.json (nije tajna). Tajne su samo ove:
+      Facebook__AppSecret: ${FACEBOOK_APP_SECRET:-}
+      Google__ClientId: ${GOOGLE_CLIENT_ID:-}
+      Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
+
     volumes:
       # Serilog file sink pise ovde — vidi Program.cs.
       - logs:/app/logs

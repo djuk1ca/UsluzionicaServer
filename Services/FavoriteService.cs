@@ -115,12 +115,14 @@ public sealed class FavoriteService(
                 FixedPrice   = f.Listing.FixedPrice,
                 PriceFrom    = f.Listing.PriceFrom,
                 PriceTo      = f.Listing.PriceTo,
-                ThumbnailUrl = f.Listing.Images
+                ThumbnailImageUrl = f.Listing.Images
                                  .OrderBy(i => i.SortOrder)
                                  .Select(i => i.ImageUrl)
                                  .FirstOrDefault(),
                 ProviderName = f.Listing.ProviderProfile.User.FullName,
                 IsBoosted    = f.Listing.IsBoosted,
+                BoostScore    = f.Listing.BoostScore,
+                BoostExpiresAt = f.Listing.BoostExpiresAt,
                 SavedAt      = f.CreatedAt
             })
             .ToListAsync();

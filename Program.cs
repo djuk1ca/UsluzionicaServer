@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using UsluzionicaServer.Infrastructure.Push;
+using UsluzionicaServer.Infrastructure.ExternalAuth;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Hubs;
 using UsluzionicaServer.Infrastructure;
@@ -306,6 +307,20 @@ else
     builder.Services.AddSingleton<IPushSender, NoopPushSender>();
 }
 
+// ── Prijava preko Google-a i Facebook-a ────────────────────────────────────
+// Oba provajdera se UVEK registruju; bez ključeva `IsConfigured` vraća false i
+// dugme vodi na poruku „nije podešeno". Isti obrazac kao FCM: razvoj i testovi
+// ne traže produkcijske tajne.
+//
+// Typed HttpClient — IHttpClientFactory upravlja konekcijama. `new HttpClient()`
+// po zahtevu bi pod opterećenjem potrošio portove (socket exhaustion).
+builder.Services.AddHttpClient<FacebookAuthProvider>(c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddHttpClient<GoogleAuthProvider>(c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddTransient<IExternalAuthProvider>(sp => sp.GetRequiredService<FacebookAuthProvider>());
+builder.Services.AddTransient<IExternalAuthProvider>(sp => sp.GetRequiredService<GoogleAuthProvider>());
+builder.Services.AddSingleton<ExternalAuthTickets>();
+builder.Services.AddScoped<ExternalLoginService>();
+
 // ── Automatska provera slika ───────────────────────────────────────────────
 // Podrazumevano ISKLJUČENA (Noop). Uključuje se podešavanjem
 // ImageModeration:Provider = "CloudVision" i ključem u ImageModeration:ApiKey.
@@ -468,6 +483,22 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = authPermitLimit,
                 Window      = TimeSpan.FromSeconds(authWindowSeconds),
+                QueueLimit  = 0
+            }));
+
+    // Prijava preko Google-a i Facebook-a.
+    //
+    // ZASEBNA od `auth`, i šira. Jedna prijava sama troši 3–4 zahteva (start,
+    // povratak, razmena, eventualno „Dovrši nalog"), pa bi `auth` sa 5 u minuti
+    // zaključao korisnika posle prvog ponovljenog pokušaja. Pogađanje lozinke,
+    // od kog `auth` štiti, ovde ne postoji — lozinku proverava provajder.
+    options.AddPolicy("oauth", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 30,
+                Window      = TimeSpan.FromMinutes(1),
                 QueueLimit  = 0
             }));
 

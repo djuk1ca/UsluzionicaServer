@@ -19,9 +19,21 @@ public sealed class FavoriteListingDto
     public decimal? FixedPrice    { get; init; }
     public decimal? PriceFrom     { get; init; }
     public decimal? PriceTo       { get; init; }
-    public string?  ThumbnailUrl  { get; init; }
+    /// <summary>
+    /// Prva slika oglasa.
+    ///
+    /// Ime MORA da se završava na „ImageUrl". <c>MediaUrlJsonModifier</c>
+    /// relativne putanje (<c>/uploads/...</c>) pretvara u pune URL-ove samo za
+    /// polja sa tim sufiksom. Ranije se zvalo <c>ThumbnailUrl</c>, pa je klijent
+    /// dobijao golu relativnu putanju — WebView je razrešava prema svom lokalnom
+    /// poreklu, a ne prema API-ju, i slika u sačuvanim oglasima se nikad nije
+    /// prikazala.
+    /// </summary>
+    public string?  ThumbnailImageUrl { get; init; }
     public string   ProviderName  { get; init; } = string.Empty;
     public bool     IsBoosted     { get; init; }
+    public decimal  BoostScore    { get; init; }
+    public DateTime? BoostExpiresAt { get; init; }
     public DateTime SavedAt       { get; init; }
 }
 
