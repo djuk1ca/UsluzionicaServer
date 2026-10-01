@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.DTOs.Conversations;
 using UsluzionicaServer.DTOs.Listings;
+using UsluzionicaServer.DTOs.Provider;
 using UsluzionicaServer.DTOs.Reviews;
 using UsluzionicaServer.IntegrationTests.Infrastructure;
 using UsluzionicaServer.Services;
@@ -34,8 +35,24 @@ public class BlockingTests(DatabaseFixture fixture) : IntegrationTestBase(fixtur
         return (klijent.Id, majstor.Id, oglasId);
     }
 
-    private Task BlokirajAsync(string ko, string koga) =>
-        WithService<BlockService>(svc => svc.BlokirajAsync(ko, koga));
+    /// <summary>
+    /// Blokira i PROVERAVA da je blokada prošla.
+    ///
+    /// Ranije se rezultat ignorisao. Test koji očekuje da nešto NIJE vidljivo
+    /// tada prolazi i kad je blokiranje palo, ako oglas nestane iz nekog drugog
+    /// razloga — a pad blokiranja je upravo kvar koji ovi testovi treba da uhvate.
+    /// </summary>
+    private async Task BlokirajAsync(string ko, string koga)
+    {
+        var (uspeh, greska) = await WithService<BlockService, (bool, string?)>(
+            svc => svc.BlokirajAsync(ko, koga));
+
+        uspeh.Should().BeTrue(greska ?? string.Empty);
+    }
+
+    private Task<ProviderProfileDto?> ProfilAsync(int profilId, string? gledalacId) =>
+        WithService<ProviderService, ProviderProfileDto?>(
+            svc => svc.GetPublicProfileAsync(profilId, gledalacId));
 
     private Task<PagedResult<ListingDto>> PretraziAsync(string? gledalacId) =>
         WithService<ListingService, PagedResult<ListingDto>>(
@@ -134,6 +151,73 @@ public class BlockingTests(DatabaseFixture fixture) : IntegrationTestBase(fixtur
         oglas.Should().NotBeNull();
     }
 
+    // ── Profil uslugodavca ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Profil_PreBlokade_Vidljiv()
+    {
+        // Pozitivna kontrola za dva testa ispod.
+        var klijent      = await Data.CreateConfirmedUserAsync("klijent@test.rs");
+        var (_, profilId) = await Data.CreateProviderAsync("majstor@test.rs");
+
+        (await ProfilAsync(profilId, klijent.Id)).Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Profil_KadKlijentBlokiraMajstora_Sakriven()
+    {
+        var klijent             = await Data.CreateConfirmedUserAsync("klijent@test.rs");
+        var (majstor, profilId) = await Data.CreateProviderAsync("majstor@test.rs");
+
+        await BlokirajAsync(klijent.Id, majstor.Id);
+
+        (await ProfilAsync(profilId, klijent.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Profil_KadMajstorBlokiraKlijenta_KlijentGaTakodjeNeVidi()
+    {
+        // Simetrija na profilu: blokirani ne sme da gleda profil onoga ko ga je
+        // blokirao. To je bio tačan opis prijavljenog kvara.
+        var klijent             = await Data.CreateConfirmedUserAsync("klijent@test.rs");
+        var (majstor, profilId) = await Data.CreateProviderAsync("majstor@test.rs");
+
+        await BlokirajAsync(majstor.Id, klijent.Id);
+
+        (await ProfilAsync(profilId, klijent.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Profil_KesiranPreBlokade_IpakSakrivenPosle()
+    {
+        // Profil se kešira u Redisu. Provera blokade mora da stoji POSLE keša —
+        // inače bi profil otvoren pre blokade još pet minuta bio vidljiv svima,
+        // uključujući onoga ko je upravo blokiran.
+        var klijent             = await Data.CreateConfirmedUserAsync("klijent@test.rs");
+        var (majstor, profilId) = await Data.CreateProviderAsync("majstor@test.rs");
+
+        (await ProfilAsync(profilId, klijent.Id)).Should().NotBeNull("prvi poziv puni keš");
+
+        await BlokirajAsync(majstor.Id, klijent.Id);
+
+        (await ProfilAsync(profilId, klijent.Id)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task OglasiNaProfilu_KadJeBlokiran_Prazni()
+    {
+        var klijent             = await Data.CreateConfirmedUserAsync("klijent@test.rs");
+        var (majstor, profilId) = await Data.CreateProviderAsync("majstor@test.rs");
+        await Data.CreateActiveListingAsync(majstor.Id);
+
+        await BlokirajAsync(majstor.Id, klijent.Id);
+
+        var oglasi = await WithService<ProviderService, List<ListingDto>>(
+            svc => svc.GetProviderListingsAsync(profilId, klijent.Id));
+
+        oglasi.Should().BeEmpty();
+    }
+
     // ── Poruke ─────────────────────────────────────────────────────────────
 
     [Fact]
@@ -172,6 +256,32 @@ public class BlockingTests(DatabaseFixture fixture) : IntegrationTestBase(fixtur
             svc => svc.SendMessageAsync(razgovor!.Id, klijentId, "Halo?"));
 
         poruka.Should().BeNull();
+        greska.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task IstorijaPoruka_DokTrajeBlokada_Nedostupna()
+    {
+        // Id razgovora preživljava blokadu — u starom obaveštenju, u push
+        // notifikaciji, u ekranu koji je već bio otvoren. Lista razgovora je
+        // filtrirana, ali bez provere ovde taj put i dalje otvara ceo razgovor.
+        //
+        // Proverava se strana koja NIJE blokirala, jer je to smer koji se lako
+        // zaboravi.
+        var (klijentId, majstorId, _) = await PostaviAsync();
+
+        var (razgovor, _) = await WithService<ConversationService, (ConversationDto?, string?)>(
+            svc => svc.GetOrCreateAsync(klijentId, majstorId));
+
+        await WithService<ConversationService>(
+            svc => svc.SendMessageAsync(razgovor!.Id, klijentId, "Dobar dan"));
+
+        await BlokirajAsync(klijentId, majstorId);
+
+        var (poruke, greska) = await WithService<ConversationService, (List<MessageDto>?, string?)>(
+            svc => svc.GetMessagesAsync(razgovor!.Id, majstorId));
+
+        poruke.Should().BeNull();
         greska.Should().NotBeNull();
     }
 

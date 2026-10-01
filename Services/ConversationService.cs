@@ -256,6 +256,21 @@ public sealed class ConversationService(
         if (conv is null)
             return (null, "Konverzacija nije pronađena.");
 
+        // Blokada zatvara i ISTORIJU, ne samo listu razgovora.
+        //
+        // Lista je filtrirana, ali id razgovora ostaje u starom obaveštenju, u
+        // push notifikaciji i u ekranu koji je već bio otvoren. Bez ove provere
+        // taj put i dalje prikazuje ceo razgovor sa poljem za pisanje — i
+        // korisniku izgleda kao da blokada nije ni postavljena.
+        //
+        // Razgovor se ne briše: posle deblokiranja ova provera prolazi i istorija
+        // se vraća cela. Ista poruka kao za nepostojeći razgovor, da odgovor ne
+        // odaje ko je koga blokirao.
+        var drugiId = conv.User1Id == userId ? conv.User2Id : conv.User1Id;
+
+        if (await blockService.JeBlokiranoAsync(userId, drugiId))
+            return (null, "Konverzacija nije pronađena.");
+
         pageSize = Math.Clamp(pageSize, 1, 100);
         page     = Math.Max(page, 1);
 

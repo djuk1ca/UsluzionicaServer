@@ -127,11 +127,18 @@ public sealed class BlockService(
         {
             await db.SaveChangesAsync();
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (JeDupliKljuc(ex))
         {
             // Dva istovremena zahteva su prošla proveru iznad pre nego što je
             // ijedan upisao. UNIQUE indeks je uhvatio drugi — a ishod koji je
             // korisnik tražio ipak postoji.
+            //
+            // SAMO taj slučaj. Ranije je ovde hvatan svaki DbUpdateException, pa
+            // je upis koji je pao iz bilo kog drugog razloga vraćao USPEH: klijent
+            // bi zatvorio ekran kao da je blokada postavljena, a u bazi ne bi bilo
+            // ničega. Za korisnika to izgleda tačno kao „blokiranje ne radi" — bez
+            // ijedne greške u aplikaciji. Svaka druga greška sada ide dalje, do
+            // 500 i loga, gde se vidi.
             return (true, null);
         }
 
@@ -140,6 +147,13 @@ public sealed class BlockService(
 
         return (true, null);
     }
+
+    /// <summary>
+    /// Kršenje UNIQUE indeksa na SQL Serveru: 2601 za jedinstveni indeks, 2627
+    /// za UNIQUE ograničenje. Oba znače „red već postoji".
+    /// </summary>
+    private static bool JeDupliKljuc(DbUpdateException ex) =>
+        ex.InnerException is Microsoft.Data.SqlClient.SqlException { Number: 2601 or 2627 };
 
     public async Task<(bool Success, string? Error)> OdblokirajAsync(
         string blockerId, string blockedId)
