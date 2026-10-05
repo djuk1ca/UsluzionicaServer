@@ -143,14 +143,30 @@ public sealed class UserService(
     /// a njegovo ime i email nigde više nisu vidljivi.
     /// </summary>
     public async Task<(bool Success, string? Error)> DeleteAccountAsync(
-        string userId, string password)
+        string userId, string? password, string? confirmation = null)
     {
         var user = await userManager.FindByIdAsync(userId);
         if (user is null) return (false, "Korisnik nije pronađen.");
 
-        // Potvrda lozinkom — brisanje je nepovratno.
-        if (!await userManager.CheckPasswordAsync(user, password))
-            return (false, "Lozinka nije ispravna.");
+        // Potvrda — brisanje je nepovratno.
+        //
+        // Nalog sa lozinkom potvrđuje LOZINKOM, i potvrdna reč je ne zamenjuje:
+        // inače bi ukraden JWT (otključan telefon u tuđim rukama) bio dovoljan
+        // da se obriše nalog.
+        //
+        // Nalog BEZ lozinke (napravljen preko Google-a/Facebook-a) nema čime
+        // drugim — ranije je ovde pucao na CheckPasswordAsync i takav korisnik
+        // NIJE MOGAO da obriše nalog, što Google Play i Apple izričito traže.
+        // Za njega se traži potvrdna reč; pristup je već potvrđen važećim JWT-om.
+        if (await userManager.HasPasswordAsync(user))
+        {
+            if (string.IsNullOrEmpty(password) || !await userManager.CheckPasswordAsync(user, password))
+                return (false, "Lozinka nije ispravna.");
+        }
+        else if (!JePotvrdnaRec(confirmation))
+        {
+            return (false, $"Upiši {PotvrdnaRec} da potvrdiš brisanje naloga.");
+        }
 
         var anonymousId    = Guid.NewGuid().ToString("N")[..12];
         var anonymousEmail = $"obrisan-{anonymousId}@usluzionica.invalid";
@@ -167,6 +183,20 @@ public sealed class UserService(
 
         // 3. Obriši avatar sa diska (relativna putanja → fizički fajl).
         TryDeleteAvatarFile(user.ProfileImageUrl);
+
+        // 3a. Raskini veze sa Google-om i Facebook-om.
+        //
+        // Bez ovoga bi veza (provajder + id) i dalje pokazivala na anonimizovan,
+        // deaktiviran nalog. Kad se ista osoba kasnije ponovo prijavi Google-om,
+        // ExternalLoginService bi pronašao TAJ nalog i odbio je kao deaktiviranu
+        // — dakle ne bi mogla ni da napravi nov nalog. Brisanje mora da znači
+        // da osoba može da počne ispočetka.
+        foreach (var veza in await userManager.GetLoginsAsync(user))
+            await userManager.RemoveLoginAsync(user, veza.LoginProvider, veza.ProviderKey);
+
+        // 3b. Uređaji za push. Token pripada telefonu; ostao bi vezan za nalog
+        // koji više ne postoji.
+        await db.DeviceTokens.Where(t => t.UserId == userId).ExecuteDeleteAsync();
 
         // 4. Anonimizuj nalog.
         user.FullName        = "Obrisan nalog";
@@ -192,6 +222,16 @@ public sealed class UserService(
         logger.LogInformation("Nalog obrisan (anonimizovan): {UserId}", userId);
         return (true, null);
     }
+
+    /// <summary>Reč kojom nalog bez lozinke potvrđuje brisanje.</summary>
+    public const string PotvrdnaRec = "OBRIŠI";
+
+    /// <summary>
+    /// Prihvata i bez dijakritike („OBRISI") i malim slovima — srpska tastatura
+    /// nije uvek pri ruci, a cilj je svesna radnja, ne test kucanja.
+    /// </summary>
+    private static bool JePotvrdnaRec(string? unos) =>
+        unos?.Trim().ToUpperInvariant() is "OBRIŠI" or "OBRISI";
 
     private void TryDeleteAvatarFile(string? relativeUrl)
     {
@@ -224,6 +264,7 @@ public sealed class UserService(
         IsProvider      = user.IsProvider,
         LastKnownCity   = user.LastKnownCity,
         ReferralCode    = user.ReferralCode,
-        CreatedAt       = user.CreatedAt
+        CreatedAt       = user.CreatedAt,
+        HasPassword     = user.PasswordHash is not null
     };
 }

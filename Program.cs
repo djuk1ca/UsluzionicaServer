@@ -571,6 +571,11 @@ if (!string.IsNullOrWhiteSpace(redisConn))
 
 var app = builder.Build();
 
+// Ključevi za poruke se proveravaju ODMAH: pogrešan Encryption:CurrentKeyId ili
+// neispravan Encryption:Keys:* ruši start (deploy ne prođe health check), a ne
+// prvu poruku nekog korisnika sat vremena kasnije.
+app.Services.GetRequiredService<MessageEncryption>();
+
 // ── Migrate + Seed ─────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {

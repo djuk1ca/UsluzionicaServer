@@ -12,4 +12,11 @@ public sealed class UserProfileDto
     public string?  LastKnownCity   { get; set; }
     public string?  ReferralCode    { get; set; }
     public DateTime CreatedAt       { get; set; }
+
+    /// <summary>
+    /// Da li nalog ima lozinku. Nalog napravljen preko Google-a ili Facebook-a
+    /// je nema — aplikacija tada pri brisanju traži potvrdnu reč umesto lozinke.
+    /// Samo na /me; javni profil koristi PublicUserDto bez ovog polja.
+    /// </summary>
+    public bool     HasPassword     { get; set; }
 }

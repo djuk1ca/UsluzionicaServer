@@ -49,8 +49,9 @@ public sealed class UsersController(UserService userService) : ControllerBase
 
     // ── DELETE /api/users/me ──────────────────────────────────────────────
     /// <summary>
-    /// Briše (anonimizuje) nalog prijavljenog korisnika. Zahteva lozinku.
-    /// Obavezno za App Store — smernica 5.1.1(v).
+    /// Briše (anonimizuje) nalog prijavljenog korisnika. Potvrda: lozinka, ili
+    /// reč „OBRIŠI" za nalog bez lozinke (Google/Facebook) — vidi DeleteAccountDto.
+    /// Obavezno za Google Play i App Store (smernica 5.1.1(v)).
     /// </summary>
     [Authorize]
     [HttpDelete("me")]
@@ -60,7 +61,7 @@ public sealed class UsersController(UserService userService) : ControllerBase
     public async Task<IActionResult> DeleteMe([FromBody] DeleteAccountDto dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var (success, error) = await userService.DeleteAccountAsync(userId, dto.Password);
+        var (success, error) = await userService.DeleteAccountAsync(userId, dto.Password, dto.Confirmation);
 
         if (!success)
             return BadRequest(new { success = false, message = error });

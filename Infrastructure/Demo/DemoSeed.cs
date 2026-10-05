@@ -261,7 +261,7 @@ public static class DemoSeed
             {
                 ConversationId = razgovor.Id,
                 SenderId       = odKlijenta ? klijent.Id : provajder.Id,
-                Text           = encryption.Encrypt(tekst),
+                Text           = encryption.Encrypt(tekst, razgovor.Id),
                 SentAt         = vreme,
                 IsRead         = true
             });

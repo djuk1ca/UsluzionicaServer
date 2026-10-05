@@ -69,7 +69,7 @@ public sealed class ConversationService(
             var lastMsg = c.Messages.FirstOrDefault();
             if (lastMsg is not null)
             {
-                var decrypted = encryption.SafeDecrypt(lastMsg.Text);
+                var decrypted = encryption.SafeDecrypt(lastMsg.Text, c.Id);
                 preview = decrypted.Length > 80
                     ? decrypted[..80] + "…"
                     : decrypted;
@@ -290,7 +290,7 @@ public sealed class ConversationService(
             SenderId       = m.SenderId,
             SenderName     = m.Sender.FullName,
             SenderImageUrl = m.Sender.ProfileImageUrl,
-            Text           = encryption.SafeDecrypt(m.Text), // dekriptovano
+            Text           = encryption.SafeDecrypt(m.Text, m.ConversationId), // dekriptovano
             SentAt         = m.SentAt,
             IsRead         = m.IsRead
         }).ToList(), null);
@@ -331,7 +331,7 @@ public sealed class ConversationService(
         var sender = await userManager.FindByIdAsync(senderId);
         if (sender is null) return (null, "Korisnik nije pronađen.");
 
-        var encrypted = encryption.Encrypt(text.Trim());
+        var encrypted = encryption.Encrypt(text.Trim(), conversationId);
 
         var message = new Message
         {

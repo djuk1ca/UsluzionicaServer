@@ -4,91 +4,198 @@ using System.Text;
 namespace UsluzionicaServer.Infrastructure;
 
 /// <summary>
-/// Simetrična AES-256-CBC enkripcija teksta poruka.
+/// Šifrovanje teksta poruka u bazi — AES-256-GCM, sa verzijom ključa.
 ///
-/// Svaka poruka se enkriptuje sa random IV (Initialization Vector) koji se
-/// dodaje ispred ciphertexta i sve zajedno se čuva kao Base64 string.
-/// Format u bazi: Base64( [16 bajta IV] + [N bajta ciphertext] )
+/// Ovo je šifrovanje U MIROVANJU, ne end-to-end: štiti sadržaj ako neko dobije
+/// direktan pristup bazi (ukraden backup, procureo connection string). Server i
+/// dalje čita poruke — pravi pregled u obaveštenjima i sprovodi rok čuvanja.
 ///
-/// Ovo je "encryption at rest" — štiti sadržaj poruka ako neko dobije
-/// direktan pristup SQL bazi. Server i dalje može da čita poruke (nije E2E).
+/// ZAŠTO GCM, A NE CBC KAO RANIJE
+///
+/// CBC bez MAC-a garantuje tajnost, ali ne i da tekst nije IZMENJEN. Ko ima
+/// pristup bazi mogao je da menja šifrovane bajtove i dobija predvidive izmene
+/// u dešifrovanom tekstu, a različite greške pri dešifrovanju mogu da posluže
+/// kao padding oracle. GCM uz šifrat čuva autentifikacioni tag: bilo kakva
+/// izmena obara dešifrovanje.
+///
+/// FORMAT U BAZI
+///
+///     v2.{idKljuča}.{Base64( nonce[12] + šifrat + tag[16] )}
+///
+///   • nonce — 12 nasumičnih bajtova po poruci. Sa nasumičnim nonce-om GCM je
+///     bezbedan do ~2³² poruka po ključu; rotacija ključa to resetuje.
+///   • AAD = id razgovora. Šifrat premešten u drugi razgovor ne prolazi proveru
+///     — sa pristupom bazi se poruka ne može „preneti" iz jednog razgovora u drugi.
+///   • idKljuča — omogućava rotaciju bez gubitka: novi ključ šifruje nove poruke,
+///     stari ostaje samo za čitanje.
+///
+/// Zapis bez prefiksa je stara CBC poruka i čita se starim kodom. Poruke se brišu
+/// posle 14 dana (MessageCleanupService), pa CBC čitanje sme da se ukloni dve
+/// nedelje posle deploya — kad `Text NOT LIKE 'v2.%'` vrati nulu.
+///
+/// KLJUČEVI
+///
+///   • k0 — IZVEDEN iz postojećeg Encryption:MessageKey preko HKDF-a, sa
+///     sopstvenom namenom. Kriptografski je nezavisan od CBC ključa, a deploy ne
+///     traži novu tajnu na serveru — zaboravljen red u .env bi inače oborio
+///     server pri prvoj poruci.
+///   • k1, k2… — pravi novi ključevi iz Encryption:Keys:{id} za rotaciju;
+///     Encryption:CurrentKeyId bira kojim se šifruje. Stari ostaju za čitanje.
 /// </summary>
 public sealed class MessageEncryption
 {
-    private readonly byte[] _key;
+    public const string Prefiks    = "v2.";
+    public const string Necitljiva = "[poruka nije čitljiva]";
+
+    private const int    NonceBajtova = 12;
+    private const int    TagBajtova   = 16;
+    private const string IzvedeniId   = "k0";
+
+    /// <summary>Stari AES-CBC ključ — samo za čitanje poruka iz vremena pre GCM-a.</summary>
+    private readonly byte[] _cbcKljuc;
+
+    private readonly Dictionary<string, byte[]> _kljucevi = new(StringComparer.Ordinal);
+    private readonly string _tekuciId;
 
     public MessageEncryption(IConfiguration config)
     {
-        var keyBase64 = config["Encryption:MessageKey"]
-            ?? throw new InvalidOperationException("Encryption:MessageKey nije konfigurisan u appsettings.");
+        _cbcKljuc = Ucitaj(config["Encryption:MessageKey"]
+            ?? throw new InvalidOperationException("Encryption:MessageKey nije konfigurisan u appsettings."),
+            "Encryption:MessageKey");
 
+        _kljucevi[IzvedeniId] = HKDF.DeriveKey(
+            HashAlgorithmName.SHA256, _cbcKljuc, outputLength: 32,
+            info: "usluzionica/poruke/aes-gcm/k0"u8.ToArray());
+
+        foreach (var kljuc in config.GetSection("Encryption:Keys").GetChildren())
+        {
+            if (kljuc.Key == IzvedeniId || !JeIspravanId(kljuc.Key))
+                throw new InvalidOperationException(
+                    $"Encryption:Keys:{kljuc.Key} — id ključa mora biti oblika k1, k2… (k0 je rezervisan za izvedeni ključ).");
+
+            _kljucevi[kljuc.Key] = Ucitaj(kljuc.Value, $"Encryption:Keys:{kljuc.Key}");
+        }
+
+        _tekuciId = config["Encryption:CurrentKeyId"] is { Length: > 0 } id ? id : IzvedeniId;
+
+        if (!_kljucevi.ContainsKey(_tekuciId))
+            throw new InvalidOperationException(
+                $"Encryption:CurrentKeyId je '{_tekuciId}', a Encryption:Keys:{_tekuciId} ne postoji.");
+    }
+
+    /// <summary>
+    /// Šifruje tekst poruke za zadati razgovor. Isti tekst svaki put daje
+    /// drugačiji rezultat (nov nonce).
+    /// </summary>
+    public string Encrypt(string plaintext, int conversationId)
+    {
+        var tekst = Encoding.UTF8.GetBytes(plaintext);
+        var izlaz = new byte[NonceBajtova + tekst.Length + TagBajtova];
+
+        var nonce  = izlaz.AsSpan(0, NonceBajtova);
+        var sifrat = izlaz.AsSpan(NonceBajtova, tekst.Length);
+        var tag    = izlaz.AsSpan(NonceBajtova + tekst.Length, TagBajtova);
+
+        RandomNumberGenerator.Fill(nonce);
+
+        using var gcm = new AesGcm(_kljucevi[_tekuciId], TagBajtova);
+        gcm.Encrypt(nonce, tekst, sifrat, tag, Aad(conversationId));
+
+        return $"{Prefiks}{_tekuciId}.{Convert.ToBase64String(izlaz)}";
+    }
+
+    /// <summary>
+    /// Dešifruje poruku. Baca <see cref="CryptographicException"/> ako je
+    /// zapis izmenjen, iz drugog razgovora ili šifrovan nepoznatim ključem.
+    /// </summary>
+    public string Decrypt(string sacuvano, int conversationId)
+    {
+        if (!sacuvano.StartsWith(Prefiks, StringComparison.Ordinal))
+            return DecryptCbc(sacuvano);
+
+        var ostatak = sacuvano.AsSpan(Prefiks.Length);
+        var tacka   = ostatak.IndexOf('.');
+        if (tacka <= 0)
+            throw new CryptographicException("Neispravan format šifrovane poruke.");
+
+        var id = ostatak[..tacka].ToString();
+        if (!_kljucevi.TryGetValue(id, out var kljuc))
+            throw new CryptographicException($"Poruka je šifrovana nepoznatim ključem '{id}'.");
+
+        var podaci = Convert.FromBase64String(ostatak[(tacka + 1)..].ToString());
+        if (podaci.Length < NonceBajtova + TagBajtova)
+            throw new CryptographicException("Šifrovana poruka je prekratka.");
+
+        var duzina = podaci.Length - NonceBajtova - TagBajtova;
+        var tekst  = new byte[duzina];
+
+        using var gcm = new AesGcm(kljuc, TagBajtova);
+        gcm.Decrypt(
+            podaci.AsSpan(0, NonceBajtova),
+            podaci.AsSpan(NonceBajtova, duzina),
+            podaci.AsSpan(NonceBajtova + duzina, TagBajtova),
+            tekst,
+            Aad(conversationId));
+
+        return Encoding.UTF8.GetString(tekst);
+    }
+
+    /// <summary>
+    /// Kao <see cref="Decrypt"/>, ali umesto izuzetka vraća
+    /// <see cref="Necitljiva"/>: jedna oštećena poruka ne sme da obori ceo
+    /// ekran razgovora.
+    /// </summary>
+    public string SafeDecrypt(string sacuvano, int conversationId)
+    {
         try
         {
-            _key = Convert.FromBase64String(keyBase64);
+            return Decrypt(sacuvano, conversationId);
         }
-        catch
+        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
         {
-            throw new InvalidOperationException("Encryption:MessageKey mora biti validan Base64 string.");
+            return Necitljiva;
+        }
+    }
+
+    // ── Pomoćno ────────────────────────────────────────────────────────────
+
+    /// <summary>Stara AES-256-CBC poruka: Base64(IV[16] + šifrat). Samo čitanje.</summary>
+    private string DecryptCbc(string base64)
+    {
+        var podaci = Convert.FromBase64String(base64);
+        if (podaci.Length < 32 || podaci.Length % 16 != 0)
+            throw new CryptographicException("Neispravna stara (CBC) poruka.");
+
+        using var aes = Aes.Create();
+        aes.Key = _cbcKljuc;
+
+        return Encoding.UTF8.GetString(aes.DecryptCbc(
+            podaci.AsSpan(16), podaci.AsSpan(0, 16), PaddingMode.PKCS7));
+    }
+
+    /// <summary>Dodatni autentifikovani podaci: poruka pripada TAČNO ovom razgovoru.</summary>
+    private static byte[] Aad(int conversationId) =>
+        Encoding.UTF8.GetBytes($"usluzionica/razgovor/{conversationId}");
+
+    private static bool JeIspravanId(string id) =>
+        id.Length is >= 2 and <= 4 && id[0] == 'k' && id[1..].All(char.IsAsciiDigit);
+
+    private static byte[] Ucitaj(string? base64, string ime)
+    {
+        byte[] kljuc;
+        try
+        {
+            kljuc = Convert.FromBase64String(base64 ?? string.Empty);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException($"{ime} mora biti validan Base64 string.");
         }
 
-        if (_key.Length != 32)
+        if (kljuc.Length != 32)
             throw new InvalidOperationException(
-                $"Encryption:MessageKey mora biti tačno 32 bajta (AES-256). Trenutno: {_key.Length} bajta.");
-    }
+                $"{ime} mora biti tačno 32 bajta (AES-256). Trenutno: {kljuc.Length} bajta.");
 
-    /// <summary>
-    /// Enkriptuje plaintext i vraća Base64 string spreman za čuvanje u bazi.
-    /// Svaki poziv generiše novi random IV — isti tekst = drugačiji ciphertext.
-    /// </summary>
-    public string Encrypt(string plaintext)
-    {
-        using var aes = Aes.Create();
-        aes.Key  = _key;
-        aes.Mode = CipherMode.CBC;
-        aes.GenerateIV(); // 16 random bajta, novo za svaku poruku
-
-        using var encryptor = aes.CreateEncryptor();
-        var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-        var ciphertext     = encryptor.TransformFinalBlock(plaintextBytes, 0, plaintextBytes.Length);
-
-        // Spoji IV + ciphertext u jedan niz, pa enkoduj u Base64
-        var result = new byte[16 + ciphertext.Length];
-        Buffer.BlockCopy(aes.IV,    0, result, 0,  16);
-        Buffer.BlockCopy(ciphertext, 0, result, 16, ciphertext.Length);
-
-        return Convert.ToBase64String(result);
-    }
-
-    /// <summary>
-    /// Dekriptuje Base64 string iz baze i vraća originalni tekst poruke.
-    /// </summary>
-    public string Decrypt(string encryptedBase64)
-    {
-        var data = Convert.FromBase64String(encryptedBase64);
-
-        // Izvuci IV (prvih 16 bajta) i ciphertext (ostatak)
-        var iv         = new byte[16];
-        var ciphertext = new byte[data.Length - 16];
-        Buffer.BlockCopy(data, 0,  iv,         0, 16);
-        Buffer.BlockCopy(data, 16, ciphertext,  0, ciphertext.Length);
-
-        using var aes = Aes.Create();
-        aes.Key  = _key;
-        aes.IV   = iv;
-        aes.Mode = CipherMode.CBC;
-
-        using var decryptor    = aes.CreateDecryptor();
-        var plaintextBytes     = decryptor.TransformFinalBlock(ciphertext, 0, ciphertext.Length);
-        return Encoding.UTF8.GetString(plaintextBytes);
-    }
-
-    /// <summary>
-    /// Pokušava dekriptovanje — vraća placeholder ako nešto pođe po krivu
-    /// (npr. stara poruka sa drugačijim ključem). Korisno za migracije.
-    /// </summary>
-    public string SafeDecrypt(string encryptedBase64)
-    {
-        try { return Decrypt(encryptedBase64); }
-        catch { return "[poruka nije čitljiva]"; }
+        return kljuc;
     }
 }
