@@ -52,12 +52,52 @@ public sealed class UserService(
     {
         // Format i ekstenzija se utvrđuju iz SADRŽAJA fajla. Ime i Content-Type
         // koje je klijent poslao se ne koriste — vidi ImageUploads.
+        var user = await userManager.FindByIdAsync(userId);
+        if (user is null) return (null, "Korisnik nije pronađen.");
+
+        return await SacuvajAvatarAsync(user, file);
+    }
+
+    /// <summary>
+    /// Postavlja avatar iz već preuzetih bajtova — profilna slika sa Google-a
+    /// ili Facebook-a posle prve prijave.
+    ///
+    /// Ide kroz ISTI <see cref="SacuvajAvatarAsync"/> kao otpremanje iz
+    /// aplikacije: slika sa provajdera nije pouzdanija od slike koju je
+    /// korisnik sam izabrao, pa ne sme da preskoči nijednu proveru.
+    /// </summary>
+    public async Task<(string? Url, string? Error)> PostaviAvatarAsync(string userId, byte[] bajtovi)
+    {
+        // Korisnik se učitava OVDE, kroz ovaj kontekst. Primljen spolja, mogao
+        // bi biti iz drugog DbContext-a — a upis takvog entiteta puca kad je
+        // isti red već praćen u ovom.
+        var user = await userManager.FindByIdAsync(userId);
+        if (user is null) return (null, "Korisnik nije pronađen.");
+
+        using var tok = new MemoryStream(bajtovi, writable: false);
+
+        var fajl = new FormFile(tok, 0, bajtovi.Length, "file", "avatar")
+        {
+            // Bez ovoga FormFile.ContentType baca NullReferenceException.
+            // Vrednost se nigde ne koristi za odluku — format se utvrđuje iz
+            // sadržaja (ImageUploads).
+            Headers     = new HeaderDictionary(),
+            ContentType = "application/octet-stream"
+        };
+
+        return await SacuvajAvatarAsync(user, fajl);
+    }
+
+    /// <summary>Provera formata i sadržaja, upis na disk, putanja u bazu.</summary>
+    private async Task<(string? Url, string? Error)> SacuvajAvatarAsync(ApplicationUser user, IFormFile file)
+    {
+        var userId = user.Id;
+
+        // Format i ekstenzija se utvrđuju iz SADRŽAJA fajla. Ime i Content-Type
+        // koje je klijent poslao se ne koriste — vidi ImageUploads.
         var (ext, uploadError) = await ImageUploads.ValidateAsync(file, ImageUploads.MaxAvatarBytes);
         if (ext is null)
             return (null, uploadError);
-
-        var user = await userManager.FindByIdAsync(userId);
-        if (user is null) return (null, "Korisnik nije pronađen.");
 
         // Automatska provera sadržaja. Bez listingId — avatar ne pripada
         // oglasu, pa se sumnjiva slika prijavljuje kao korisnik.

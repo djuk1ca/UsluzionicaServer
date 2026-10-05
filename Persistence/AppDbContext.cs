@@ -86,6 +86,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             // "2026-09" — 16 je sa viškom dovoljno, a sprečava nvarchar(max)
             // koji EF podrazumeva za string bez dužine.
             e.Property(u => u.PolicyVersionAccepted).HasMaxLength(16);
+
+            // Kod iz AcquisitionSources ("uslugodavac", "clanak-tv"…).
+            e.Property(u => u.AcquisitionSource).HasMaxLength(40);
             e.HasIndex(u => u.ReferralCode).IsUnique();
             e.Property(u => u.CreatedAt).HasDefaultValueSql("GETUTCDATE()");
 

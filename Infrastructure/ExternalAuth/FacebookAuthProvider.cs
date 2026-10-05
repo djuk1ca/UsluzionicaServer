@@ -26,7 +26,17 @@ public sealed class FacebookAuthProvider(HttpClient http, IConfiguration config)
     /// </summary>
     private string Version => config["Facebook:GraphVersion"] is { Length: > 0 } v ? v : "v24.0";
 
-    public bool IsConfigured => AppId.Length > 0 && AppSecret.Length > 0;
+    /// <summary>
+    /// Ključevi postoje I prijava je izričito uključena (<c>Facebook:Enabled</c>).
+    ///
+    /// Zašto poseban prekidač kad ključevi već postoje: dok je Meta aplikacija u
+    /// razvojnom režimu (pre App Review-a), Facebook prijava radi SAMO za naloge
+    /// sa ulogom u aplikaciji. Svaki drugi korisnik bi tapnuo dugme i dobio
+    /// grešku na Facebook-ovoj strani — na prvom ekranu koji vidi. Podrazumevano
+    /// isključeno; uključuje se kroz .env kad Meta pusti aplikaciju u Live.
+    /// </summary>
+    public bool IsConfigured =>
+        config.GetValue("Facebook:Enabled", false) && AppId.Length > 0 && AppSecret.Length > 0;
 
     public string BuildAuthorizeUrl(string state, string redirectUri) =>
         $"https://www.facebook.com/{Version}/dialog/oauth" +
@@ -65,9 +75,11 @@ public sealed class FacebookAuthProvider(HttpClient http, IConfiguration config)
             Encoding.UTF8.GetBytes(AppSecret),
             Encoding.UTF8.GetBytes(token.AccessToken))).ToLowerInvariant();
 
+        // Slika traži 400×400 — podrazumevana je 50×50, mutna već na profilu.
+        // Ne traži posebnu dozvolu; deo je `public_profile`.
         var meUrl =
             $"https://graph.facebook.com/{Version}/me" +
-            "?fields=id,name,email" +
+            $"?fields={Uri.EscapeDataString("id,name,email,picture.width(400).height(400)")}" +
             $"&access_token={Uri.EscapeDataString(token.AccessToken)}" +
             $"&appsecret_proof={proof}";
 
@@ -95,14 +107,28 @@ public sealed class FacebookAuthProvider(HttpClient http, IConfiguration config)
             // mejl bila bi preuzimanje tuđeg naloga. Prvo je neprijatnost,
             // drugo je propust.
             EmailVerified: false,
-            Name:        me.Name?.Trim() ?? string.Empty);
+            Name:        me.Name?.Trim() ?? string.Empty,
+
+            // Facebook vraća sivu siluetu kad korisnik nema sliku. Bolje bez
+            // avatara (aplikacija prikazuje inicijale) nego sa tuđom siluetom.
+            PictureUrl:  me.Picture?.Data is { IsSilhouette: false, Url.Length: > 0 } slika
+                             ? slika.Url
+                             : null);
     }
 
     private sealed record TokenOdgovor(
         [property: JsonPropertyName("access_token")] string? AccessToken);
 
     private sealed record MeOdgovor(
-        [property: JsonPropertyName("id")]    string? Id,
-        [property: JsonPropertyName("name")]  string? Name,
-        [property: JsonPropertyName("email")] string? Email);
+        [property: JsonPropertyName("id")]      string?     Id,
+        [property: JsonPropertyName("name")]    string?     Name,
+        [property: JsonPropertyName("email")]   string?     Email,
+        [property: JsonPropertyName("picture")] SlikaOmot?  Picture);
+
+    private sealed record SlikaOmot(
+        [property: JsonPropertyName("data")] SlikaPodaci? Data);
+
+    private sealed record SlikaPodaci(
+        [property: JsonPropertyName("url")]           string? Url,
+        [property: JsonPropertyName("is_silhouette")] bool    IsSilhouette);
 }

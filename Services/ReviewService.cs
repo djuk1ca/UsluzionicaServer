@@ -11,8 +11,23 @@ namespace UsluzionicaServer.Services;
 ///
 /// Pravila:
 ///   - Jedan autor = jedna recenzija po listingu (UNIQUE u bazi).
-///   - BookingRequestId je opciono; ako je dat mora biti Completed i vlasništvo autora.
+///   - OCENA SAMO UZ IZVRŠENU USLUGU: BookingRequestId je obavezan, booking mora
+///     biti Completed, autor mora biti klijent tog booking-a.
 ///   - Nakon svake nove recenzije recalculate ProviderProfile.AverageRating i TotalReviews.
+///
+/// ZAŠTO JE BOOKING OBAVEZAN
+///
+/// Ranije je bio opcion, pa je ocenu mogao da ostavi svako prijavljen —
+/// prijatelj uslugodavca ili konkurent. Ocene su jedina stvar koja Uslužionicu
+/// razlikuje od oglasa po Facebook grupama; ocena kojoj se ne može verovati to
+/// poništava. Sajt i marketing smeju da tvrde da su ocene potvrđene tek kad
+/// ovo pravilo postoji (Marketing 14 P0-2).
+///
+/// OCENE NASTALE PRE OVOG PRAVILA
+///
+/// Ne brišu se — samo se ne prikazuju i ne ulaze u prosek (<see cref="Potvrdjene"/>).
+/// Odluka je reverzibilna jednim filterom, a autor ništa ne gubi: kad završi
+/// uslugu kod istog uslugodavca, stara ocena se nadograđuje u potvrđenu.
 /// </summary>
 public sealed class ReviewService(
     AppDbContext            db,
@@ -50,41 +65,63 @@ public sealed class ReviewService(
         if (await blockService.JeBlokiranoAsync(authorId, listing.ProviderProfile.UserId))
             return (null, "Recenzija za ovaj oglas nije moguća.");
 
-        // Validacija BookingRequestId — opciono ali strogo ako je dato
-        if (dto.BookingRequestId.HasValue)
-        {
-            var booking = await db.BookingRequests
-                .AsNoTracking()
-                .FirstOrDefaultAsync(b =>
-                    b.Id       == dto.BookingRequestId.Value &&
-                    b.ClientId == authorId);
+        // Ocena samo uz izvršenu uslugu — vidi komentar uz klasu.
+        if (dto.BookingRequestId is not int bookingId)
+            return (null, "Ocenu možeš ostaviti posle izvršene usluge, iz ekrana Moje rezervacije.");
 
-            if (booking is null)
-                return (null, "Booking zahtev nije pronađen ili ne pripada vam.");
+        var booking = await db.BookingRequests
+            .AsNoTracking()
+            .FirstOrDefaultAsync(b => b.Id == bookingId && b.ClientId == authorId);
 
-            if (booking.Status != BookingStatus.Completed)
-                return (null, "Recenzija vezana za booking može se ostaviti samo za završenu uslugu.");
+        if (booking is null)
+            return (null, "Rezervacija nije pronađena ili ne pripada vama.");
 
-            if (booking.ListingId != dto.ListingId)
-                return (null, "Booking zahtev ne odgovara navedenom listingu.");
-        }
+        if (booking.Status != BookingStatus.Completed)
+            return (null, "Ocenu možeš ostaviti tek kad je usluga izvršena.");
+
+        if (booking.ListingId != dto.ListingId)
+            return (null, "Rezervacija ne odgovara ovom oglasu.");
 
         var author = await db.Users.FindAsync(authorId);
         if (author is null)
             return (null, "Korisnik nije pronađen.");
 
-        var now    = DateTime.UtcNow;
-        var review = new Review
-        {
-            ListingId        = dto.ListingId,
-            BookingRequestId = dto.BookingRequestId,
-            AuthorId         = authorId,
-            Stars            = dto.Stars,
-            Comment          = dto.Comment?.Trim(),
-            CreatedAt        = now
-        };
+        var now = DateTime.UtcNow;
 
-        db.Reviews.Add(review);
+        // Ocena istog autora na istom oglasu iz vremena pre ovog pravila (bez
+        // usluge) se NADOGRAĐUJE. UNIQUE (oglas, autor) bi inače zauvek
+        // sprečio potvrđenu ocenu klijentu koji je pre pravila ocenio „na reč".
+        var stara = await db.Reviews
+            .FirstOrDefaultAsync(r => r.ListingId == dto.ListingId && r.AuthorId == authorId);
+
+        Review review;
+
+        if (stara is { BookingRequestId: null })
+        {
+            stara.BookingRequestId = bookingId;
+            stara.Stars            = dto.Stars;
+            stara.Comment          = dto.Comment?.Trim();
+            stara.CreatedAt        = now;
+            review                 = stara;
+        }
+        else if (stara is not null)
+        {
+            return (null, "Već ste ostavili recenziju za ovaj oglas.");
+        }
+        else
+        {
+            review = new Review
+            {
+                ListingId        = dto.ListingId,
+                BookingRequestId = bookingId,
+                AuthorId         = authorId,
+                Stars            = dto.Stars,
+                Comment          = dto.Comment?.Trim(),
+                CreatedAt        = now
+            };
+
+            db.Reviews.Add(review);
+        }
 
         try
         {
@@ -122,10 +159,10 @@ public sealed class ReviewService(
     {
         pageSize = Math.Clamp(pageSize, 1, 50);
 
-        var query = db.Reviews
+        var query = Potvrdjene(db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
-            .Include(r => r.Listing)
+            .Include(r => r.Listing))
             .Where(r => r.ListingId == listingId);
 
         // Recenzije blokiranih se sklanjaju gledaocu.
@@ -170,10 +207,10 @@ public sealed class ReviewService(
     {
         pageSize = Math.Clamp(pageSize, 1, 50);
 
-        var query = db.Reviews
+        var query = Potvrdjene(db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
-            .Include(r => r.Listing)
+            .Include(r => r.Listing))
             .Where(r => r.Listing.ProviderProfileId == providerProfileId);
 
         // Isto pravilo kao u GetByListingAsync — filtrira se po autoru recenzije.
@@ -220,8 +257,7 @@ public sealed class ReviewService(
             return null;
 
         // Raspored po zvezdicama — grupisano u SQL
-        var breakdown = await db.Reviews
-            .AsNoTracking()
+        var breakdown = await Potvrdjene(db.Reviews.AsNoTracking())
             .Where(r => r.Listing.ProviderProfileId == providerProfileId)
             .GroupBy(r => r.Stars)
             .Select(g => new { Stars = g.Key, Count = g.Count() })
@@ -250,7 +286,7 @@ public sealed class ReviewService(
     /// </summary>
     private async Task RecalculateProviderRatingAsync(int providerProfileId)
     {
-        var stats = await db.Reviews
+        var stats = await Potvrdjene(db.Reviews)
             .Where(r => r.Listing.ProviderProfileId == providerProfileId)
             .GroupBy(_ => 1)
             .Select(g => new
@@ -272,6 +308,15 @@ public sealed class ReviewService(
     }
 
     // ── HELPER ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Samo ocene vezane za izvršenu uslugu. JEDNO mesto za pravilo — prikaz
+    /// ocena, raspored zvezdica i prosek moraju brojati isto, inače bi profil
+    /// pokazivao prosek od ocena koje se na njemu ne vide.
+    /// </summary>
+    public static IQueryable<Review> Potvrdjene(IQueryable<Review> ocene) =>
+        ocene.Where(r => r.BookingRequestId != null);
+
     private static ReviewDto MapToDto(Review r, string listingTitle, ApplicationUser author) => new()
     {
         Id               = r.Id,

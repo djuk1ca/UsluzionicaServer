@@ -43,6 +43,21 @@ public sealed class ExternalAuthController(
     private string AppCallback =>
         config["ExternalAuth:CallbackUri"] is { Length: > 0 } uri ? uri : "usluzionica://auth";
 
+    // ── GET /api/auth/providers ────────────────────────────────────────────
+    /// <summary>
+    /// Koji provajderi su trenutno uključeni — aplikacija prikazuje samo njihova
+    /// dugmad. Tako se Facebook pali i gasi kroz .env servera, bez novog izdanja
+    /// aplikacije i bez čekanja na Play review.
+    /// </summary>
+    [HttpGet("providers")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public IActionResult Providers() =>
+        Ok(new
+        {
+            success = true,
+            data    = providers.Where(p => p.IsConfigured).Select(p => p.Name).ToList()
+        });
+
     // ── GET /api/auth/{provider}/start ─────────────────────────────────────
     [HttpGet("{provider}/start")]
     [EnableRateLimiting("oauth")]
@@ -164,7 +179,8 @@ public sealed class ExternalAuthController(
                 SignupToken = tickets.ProtectSignup(new(rez.Identity, rez.ReferralCode)),
                 FullName    = rez.Identity.Name,
                 Email       = rez.Identity.Email,
-                Provider    = rez.Identity.Provider
+                Provider    = rez.Identity.Provider,
+                PictureUrl  = rez.Identity.PictureUrl
             }
         });
     }

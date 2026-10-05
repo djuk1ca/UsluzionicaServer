@@ -26,6 +26,8 @@ public sealed class ExternalLoginService(
     AppDbContext                   db,
     AuthService                    authService,
     ReferralService                referralService,
+    UserService                    userService,
+    ProfilnaSlikaProvajdera        profilnaSlika,
     ILogger<ExternalLoginService>  logger)
 {
     /// <summary>
@@ -124,7 +126,9 @@ public sealed class ExternalLoginService(
             EmailConfirmed = true,
 
             PolicyAcceptedAt      = DateTime.UtcNow,
-            PolicyVersionAccepted = PolicyVersion.Current
+            PolicyVersionAccepted = PolicyVersion.Current,
+
+            AcquisitionSource     = AcquisitionSources.Normalizuj(req.AcquisitionSource)
         };
 
         // BEZ LOZINKE. Nalog napravljen preko Google-a nema lozinku dok je
@@ -158,6 +162,8 @@ public sealed class ExternalLoginService(
         // Kod registracije lozinkom prva rata ide tek kad korisnik klikne
         // verifikacioni link. Ovde je mejl već potvrđen, pa ide odmah.
         await referralService.TryRewardSignupAsync(user.Id);
+
+        await PreuzmiSlikuAsync(user, id);
 
         // Id, ne mejl — lični podatak ne pripada logu.
         logger.LogInformation("Novi korisnik {UserId} registrovan preko {Provider}.", user.Id, id.Provider);
@@ -207,5 +213,40 @@ public sealed class ExternalLoginService(
                 $"AddLoginAsync nije uspeo: {string.Join(", ", result.Errors.Select(e => e.Code))}");
 
         logger.LogInformation("Nalog {UserId} povezan sa {Provider}.", user.Id, id.Provider);
+
+        // Postojeći nalog dobija sliku SAMO ako je nema. Avatar koji je korisnik
+        // sam izabrao ne sme da pregazi slika koju je nekad stavio na Google.
+        // Iz istog razloga se ime ovde ne dira.
+        if (string.IsNullOrEmpty(user.ProfileImageUrl))
+            await PreuzmiSlikuAsync(user, id);
+    }
+
+    /// <summary>
+    /// Profilna slika sa provajdera — najbolji pokušaj. Slika je ukras: ni
+    /// nedostupan CDN ni slika koja ne prođe proveru ne smeju da obore
+    /// registraciju ili prijavu. Korisnik je uvek može postaviti sam.
+    /// </summary>
+    private async Task PreuzmiSlikuAsync(ApplicationUser user, ExternalIdentity id)
+    {
+        if (string.IsNullOrWhiteSpace(id.PictureUrl))
+            return;
+
+        try
+        {
+            var bajtovi = await profilnaSlika.PreuzmiAsync(id.PictureUrl);
+            if (bajtovi is null)
+                return;
+
+            var (url, greska) = await userService.PostaviAvatarAsync(user.Id, bajtovi);
+            if (url is null)
+                logger.LogInformation(
+                    "Slika sa {Provider} nije prihvaćena za korisnika {UserId}: {Greska}",
+                    id.Provider, user.Id, greska);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Upis na disk — pun disk ili prava nad volumenom. Nalog ostaje.
+            logger.LogWarning(ex, "Profilna slika za korisnika {UserId} nije sačuvana.", user.Id);
+        }
     }
 }

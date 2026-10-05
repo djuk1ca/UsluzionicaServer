@@ -21,4 +21,7 @@ public sealed class RegisterRequest
     /// i mimo aplikacije. Zato se odbijanje radi i ovde.
     /// </summary>
     public bool AcceptedPolicy { get; set; }
+
+    /// <summary>„Kako si čuo za nas?" — opciono, vidi <c>AcquisitionSources</c>.</summary>
+    public string? AcquisitionSource { get; set; }
 }

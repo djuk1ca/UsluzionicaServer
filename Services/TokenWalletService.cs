@@ -317,11 +317,20 @@ public sealed class TokenWalletService(
 
         if (code is null) return null;
 
-        var baseUrl = config["App:BaseUrl"] ?? "https://usluzionica.rs";
+        // Link vodi na SAJT, ne na API.
+        //
+        // Ranije je bio `{App:BaseUrl}/register?ref=…` — a App:BaseUrl je u
+        // produkciji api.usluzionica.rs, gde ta stranica ne postoji (404). Svaka
+        // pozivnica poslata prijatelju završavala je na stranici greške.
+        //
+        // App:BaseUrl ostaje za ono što zaista ide na API (linkovi za potvrdu
+        // mejla i slike); stranica pozivnice je deo sajta.
+        var siteUrl = (config["App:SiteUrl"] is { Length: > 0 } s ? s : "https://usluzionica.rs").TrimEnd('/');
+
         return new MyReferralCodeDto
         {
             ReferralCode  = code,
-            ShareableLink = $"{baseUrl}/register?ref={code}"
+            ShareableLink = $"{siteUrl}/pozivnica/{Uri.EscapeDataString(code)}"
         };
     }
 

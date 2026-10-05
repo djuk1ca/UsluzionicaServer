@@ -48,6 +48,9 @@ if (args.Length > 0)
 
 // Padne odmah, sa jasnom porukom, ako neka obavezna tajna nedostaje.
 SecretsGuard.Validate(builder.Configuration, builder.Environment);
+
+// Demo podaci nikad u produkciji — server odbija start, ne samo preskače seed.
+UsluzionicaServer.Infrastructure.Demo.DemoSeed.ProveriOkruzenje(builder.Configuration, builder.Environment);
 // ── Serilog ────────────────────────────────────────────────────────────────
 // Konzola OSTAJE — `docker compose logs` je i dalje najbrži put kad si ionako
 // na serveru. Fajl se dodaje jer konzola živi koliko i kontejner: posle
@@ -319,6 +322,11 @@ builder.Services.AddHttpClient<GoogleAuthProvider>(c => c.Timeout = TimeSpan.Fro
 builder.Services.AddTransient<IExternalAuthProvider>(sp => sp.GetRequiredService<FacebookAuthProvider>());
 builder.Services.AddTransient<IExternalAuthProvider>(sp => sp.GetRequiredService<GoogleAuthProvider>());
 builder.Services.AddSingleton<ExternalAuthTickets>();
+
+// Preuzimanje profilne slike sa provajdera. Preusmerenja NE prati sam —
+// ProfilnaSlikaProvajdera proverava domen svakog skoka (zaštita od SSRF-a).
+builder.Services.AddHttpClient<ProfilnaSlikaProvajdera>(c => c.Timeout = TimeSpan.FromSeconds(5))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.AddScoped<ExternalLoginService>();
 
 // ── Automatska provera slika ───────────────────────────────────────────────
@@ -579,6 +587,12 @@ using (var scope = app.Services.CreateScope())
     // ništa i ne usporava start.
     await SearchIndexBackfill.RunAsync(
         db, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+
+    // Samo uz DemoSeed:Enabled=true i nikad u Production (provereno pri startu).
+    if (UsluzionicaServer.Infrastructure.Demo.DemoSeed.JeUkljucen(builder.Configuration))
+        await UsluzionicaServer.Infrastructure.Demo.DemoSeed.RunAsync(
+            scope.ServiceProvider, builder.Configuration,
+            scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
 }
 
 // ── Middleware pipeline ────────────────────────────────────────────────────
