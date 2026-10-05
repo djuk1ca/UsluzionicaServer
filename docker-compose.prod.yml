@@ -112,6 +112,8 @@ services:
       #
       # Facebook AppId je u appsettings.json (nije tajna). Tajne su samo ove:
       Facebook__AppSecret: ${FACEBOOK_APP_SECRET:-}
+      # Dugme se prikazuje tek kad je ovo true — vidi appsettings.json.
+      Facebook__Enabled: ${FACEBOOK_ENABLED:-false}
       Google__ClientId: ${GOOGLE_CLIENT_ID:-}
       Google__ClientSecret: ${GOOGLE_CLIENT_SECRET:-}
 

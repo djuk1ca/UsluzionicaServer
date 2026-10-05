@@ -47,6 +47,17 @@
 		-Server
 	}
 
+	# ── Kompresija ─────────────────────────────────────────────────────────
+	# JSON se dobro sažima: /api/categories ~19 KB → ~3 KB sa gzip-om. Na
+	# mobilnim podacima to je razlika koja se oseti pri prvom pokretanju.
+	# zstd za klijente koji ga traže, gzip za sve ostale.
+	#
+	# BEZ /hubs. WebSocket ionako ne bi bio diran, ali SignalR ume da padne na
+	# Server-Sent Events — a kompresija zadržava takav tok u baferu, pa poruke
+	# i obaveštenja ne bi stizali odmah nego u paketima.
+	@kompresija not path /hubs/*
+	encode @kompresija zstd gzip
+
 	# ── SignalR ────────────────────────────────────────────────────────────
 	# Chat ide preko WebSocket-a. Caddy prosleđuje Upgrade zaglavlja sam, ali
 	# podrazumevani timeout od nekoliko sekundi bi rušio žive konekcije, pa se
@@ -114,6 +125,15 @@
 		X-Frame-Options "DENY"
 		-Server
 	}
+
+	# ── Kompresija ─────────────────────────────────────────────────────────
+	# Statiku kompresuje MapStaticAssets (unapred, brotli), ali HTML stranicu
+	# niko nije — išla je sirova, oko 90 KB. Caddy je sabija u pregovoru sa
+	# pregledačem; zstd je prvi jer je brži, gzip je rezerva za starije.
+	#
+	# Bez matchera kao kod API-ja: ovde nema SignalR toka koji bi se zadržao
+	# u baferu, sve je običan HTML i statika.
+	encode zstd gzip
 
 	# ── Keširanje ──────────────────────────────────────────────────────────
 	# Statika ima otisak u imenu (MapStaticAssets), pa sme godinu dana.

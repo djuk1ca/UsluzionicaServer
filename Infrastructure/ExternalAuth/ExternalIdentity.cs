@@ -18,12 +18,17 @@ namespace UsluzionicaServer.Infrastructure.ExternalAuth;
 /// postojećim nalogom po mejlu — inače bi ko god napravi nalog kod provajdera
 /// sa tuđim mejlom preuzeo tuđi nalog kod nas.
 /// </param>
+/// <param name="PictureUrl">
+/// Adresa profilne slike kod provajdera. Služi SAMO da se slika jednom preuzme
+/// na naš server — ne čuva se i ne prikazuje dalje (vidi ProfilnaSlikaProvajdera).
+/// </param>
 public sealed record ExternalIdentity(
     string  Provider,
     string  ProviderKey,
     string? Email,
     bool    EmailVerified,
-    string  Name);
+    string  Name,
+    string? PictureUrl = null);
 
 /// <summary>
 /// Provajder je odbio razmenu ili vratio nešto neočekivano. Poruka ide u log,

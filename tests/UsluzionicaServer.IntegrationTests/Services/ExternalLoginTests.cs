@@ -199,6 +199,45 @@ public class ExternalLoginTests(DatabaseFixture fixture) : IntegrationTestBase(f
         ishod.Should().BeOfType<Odbijen>().Which.Greska.Should().Be(Greske.NemaEmail);
     }
 
+    // ── Profilna slika ─────────────────────────────────────────────────────
+
+    /// <summary>Najmanji niz koji prolazi proveru potpisa JPEG-a.</summary>
+    private static byte[] JpegBajtovi() =>
+        [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, (byte)'J', (byte)'F', (byte)'I', (byte)'F', 0x00, 0x01, 0x01, 0x00];
+
+    [Fact]
+    public async Task SlikaSaProvajdera_PostajeAvatar()
+    {
+        var user = await Data.CreateConfirmedUserAsync("ana@test.rs");
+
+        var (url, greska) = await WithService<UserService, (string?, string?)>(
+            svc => svc.PostaviAvatarAsync(user.Id, JpegBajtovi()));
+
+        greska.Should().BeNull();
+        url.Should().NotBeNull();
+
+        var sacuvano = await Query(db => db.Users.Where(u => u.Id == user.Id)
+            .Select(u => u.ProfileImageUrl).SingleAsync());
+        sacuvano.Should().Be($"/uploads/avatars/{user.Id}.jpg",
+            "u bazu ide NAŠA relativna putanja, ne adresa sa Google-a ili Facebook-a");
+    }
+
+    [Fact]
+    public async Task SlikaSaProvajdera_KojaNijeSlika_Odbijena()
+    {
+        // Slika sa provajdera ne preskače nijednu proveru — ista kapija kao
+        // avatar koji korisnik sam otpremi.
+        var user = await Data.CreateConfirmedUserAsync("ana@test.rs");
+
+        var (url, greska) = await WithService<UserService, (string?, string?)>(
+            svc => svc.PostaviAvatarAsync(user.Id, "<html><script>alert(1)</script></html>"u8.ToArray()));
+
+        url.Should().BeNull();
+        greska.Should().NotBeNull();
+        (await Query(db => db.Users.Where(u => u.Id == user.Id)
+            .Select(u => u.ProfileImageUrl).SingleAsync())).Should().BeNull();
+    }
+
     [Fact]
     public async Task DeaktiviranNalog_Odbijen()
     {

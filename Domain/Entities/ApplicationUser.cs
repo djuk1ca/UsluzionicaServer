@@ -29,6 +29,17 @@ public class ApplicationUser : IdentityUser
     /// <summary>Oznaka verzije politike, npr. „2026-09". Vidi <see cref="Infrastructure.PolicyVersion"/>.</summary>
     public string?         PolicyVersionAccepted { get; set; }
 
+    // ── Odakle je korisnik došao ───────────────────────────────────────────
+    /// <summary>
+    /// Odgovor na „Kako si čuo za nas?" — kod iz
+    /// <see cref="Infrastructure.AcquisitionSources"/>. Null = nije odgovoreno
+    /// (pitanje je opciono) ili nalog postoji od pre ovog pitanja.
+    ///
+    /// Postoji jer UTM hvata samo klik na link. Ko je video snimak pa tri dana
+    /// kasnije sam ukucao ime u Play, za UTM je „nepoznat" — ovo polje ga hvata.
+    /// </summary>
+    public string?         AcquisitionSource     { get; set; }
+
     // ── Denormalizovani indeks za pretragu ─────────────────────────────────
     // Održava AppDbContext.SaveChanges kroz SearchIndexer. Koristi ga admin
     // pretraga korisnika, da "milos" nađe i "Miloš".

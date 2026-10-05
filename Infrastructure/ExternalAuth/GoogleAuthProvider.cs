@@ -75,8 +75,18 @@ public sealed class GoogleAuthProvider(HttpClient http, IConfiguration config) :
             ProviderKey:   payload.Subject,
             Email:         string.IsNullOrWhiteSpace(payload.Email) ? null : payload.Email.Trim(),
             EmailVerified: payload.EmailVerified,
-            Name:          payload.Name?.Trim() ?? string.Empty);
+            Name:          payload.Name?.Trim() ?? string.Empty,
+            PictureUrl:    VecaSlika(payload.Picture));
     }
+
+    /// <summary>
+    /// Google vraća sliku 96×96 (sufiks <c>=s96-c</c>). Ista adresa sa
+    /// <c>=s400-c</c> daje 400×400 — dovoljno oštro i za veći prikaz profila.
+    /// </summary>
+    public static string? VecaSlika(string? url) =>
+        string.IsNullOrWhiteSpace(url)
+            ? null
+            : System.Text.RegularExpressions.Regex.Replace(url, @"=s\d+-c$", "=s400-c");
 
     private sealed record TokenOdgovor(
         [property: JsonPropertyName("id_token")] string? IdToken);

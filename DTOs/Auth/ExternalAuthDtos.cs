@@ -28,6 +28,14 @@ public sealed class ExternalExchangeResponse
     public string?       FullName    { get; set; }
     public string?       Email       { get; set; }
     public string?       Provider    { get; set; }
+
+    /// <summary>
+    /// Slika sa provajdera, samo za pregled na „Dovrši nalog" — učitava je
+    /// korisnikov telefon, jednom. U nalog ide kopija preuzeta na naš server.
+    /// Ime namerno NE završava na „ImageUrl", da je MediaUrlJsonModifier ne
+    /// tretira kao našu relativnu putanju.
+    /// </summary>
+    public string?       PictureUrl  { get; set; }
 }
 
 /// <summary>
@@ -53,4 +61,8 @@ public sealed class ExternalRegisterRequest
 
     /// <summary>Isto pravilo kao u <see cref="RegisterRequest.AcceptedPolicy"/>.</summary>
     public bool AcceptedPolicy { get; set; }
+
+    /// <summary>„Kako si čuo za nas?" — opciono, vidi <c>AcquisitionSources</c>.</summary>
+    [StringLength(40)]
+    public string? AcquisitionSource { get; set; }
 }

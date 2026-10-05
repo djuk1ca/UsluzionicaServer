@@ -36,9 +36,21 @@ jobs:
   build-and-push:
     name: Build i push slike
     runs-on: ubuntu-latest
+    # KAPIJA — i nije samo „da li je CI prošao".
+    #
+    # `branches: [main]` gore NE ŠTITI od tuđeg koda: kod `workflow_run` filter
+    # gleda IME GRANE iz koje je CI pokrenut. PR iz forka čija se grana takođe
+    # zove `main` prolazi taj filter — a korak ispod bi zatim preuzeo
+    # `head_sha`, dakle KOD IZ FORKA, napravio sliku i deployovao je na Hetzner
+    # našim SSH ključem. Javni repo to čini realnim napadom, ne teorijom.
+    #
+    # Zato se traži sve troje: CI je pokrenut PUSH-om, u OVOM repou, na main.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
 
     permissions:
       contents: read

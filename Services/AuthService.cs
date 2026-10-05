@@ -48,9 +48,11 @@ public sealed class AuthService(
             // politike ne može utvrditi ko je prihvatio koju, pa bi se nova
             // saglasnost morala tražiti od svih.
             PolicyAcceptedAt      = DateTime.UtcNow,
-            PolicyVersionAccepted = PolicyVersion.Current
+            PolicyVersionAccepted = PolicyVersion.Current,
+
+            AcquisitionSource     = AcquisitionSources.Normalizuj(req.AcquisitionSource)
         };
-        
+
         var result = await userManager.CreateAsync(user, req.Password);
         if (!result.Succeeded)
             return (false, result.Errors.Select(e => e.Description).ToArray());

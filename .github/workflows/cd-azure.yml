@@ -40,9 +40,16 @@ jobs:
 
     # KAPIJA: `workflow_run` se okida i kad CI PADNE. Bez ove provere bi se
     # deployovao pokvaren kod — što je gore nego da CD uopšte ne postoji.
+    #
+    # I nije dovoljno da je CI prošao — vidi isti komentar u cd-hetzner.yml:
+    # PR iz forka sa granom nazvanom `main` bi inače prošao `branches: [main]`
+    # i deployovao kod iz forka sa našim tajnama.
     if: >
       github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
 
     permissions:
       contents: read

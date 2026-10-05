@@ -411,12 +411,11 @@ public sealed class BookingService(
     /// <summary>
     /// Izvršene usluge klijenta za koje još nije ostavio recenziju.
     ///
-    /// Postojanje recenzije se proverava po PARU (autor, oglas), a ne po
-    /// booking-u. Recenzija sme da se ostavi i bez veze sa booking-om
-    /// (<c>BookingRequestId</c> je opciono u <c>CreateReviewDto</c>), pa bi
-    /// provera po booking-u prijavila kao neocenjenu i uslugu koju je klijent
-    /// upravo ocenio sa stranice oglasa. Isti kriterijum koristi i lista
-    /// „Moje rezervacije" kad odlučuje da li da ponudi dugme za ocenu.
+    /// Postojanje recenzije se proverava po PARU (autor, oglas), jer je to i
+    /// UNIQUE u bazi — jedna ocena po oglasu. Broje se samo POTVRĐENE ocene:
+    /// ocena ostavljena pre pravila „samo uz izvršenu uslugu" se ne prikazuje,
+    /// pa klijent treba da dobije poziv da je ponovi — ReviewService je tada
+    /// nadograđuje umesto da je odbije kao duplikat.
     /// </summary>
     public async Task<List<PendingReviewDto>> GetPendingReviewsAsync(string clientId)
     {
@@ -425,7 +424,8 @@ public sealed class BookingService(
             .Where(b => b.ClientId == clientId
                      && b.Status   == BookingStatus.Completed
                      && !db.Reviews.Any(r => r.AuthorId  == clientId
-                                          && r.ListingId == b.ListingId))
+                                          && r.ListingId == b.ListingId
+                                          && r.BookingRequestId != null))
             .OrderByDescending(b => b.UpdatedAt)
             .Select(b => new PendingReviewDto
             {
