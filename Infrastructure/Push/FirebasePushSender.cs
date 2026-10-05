@@ -140,7 +140,16 @@ public sealed class FirebasePushSender : IPushSender
                 Notification = new AndroidNotification
                 {
                     ChannelId = ChannelId,
-                    Tag       = kljucGrupe
+                    Tag       = kljucGrupe,
+
+                    // OBAVEZNO, iako izgleda kao opciono polje.
+                    //
+                    // U FirebaseAdmin .NET `EventTimestamp` je obican DateTime,
+                    // ne DateTime?, pa se `event_time` UVEK šalje — kad nije
+                    // postavljen, kao 0001-01-01. Android tu vrednost uzme za
+                    // vreme obaveštenja i telefon prikaže besmislicu („2032 god")
+                    // umesto „pre 2 min".
+                    EventTimestamp = DateTime.UtcNow
                 }
             },
 
