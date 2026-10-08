@@ -57,7 +57,10 @@ jobs:
       packages: write
 
     outputs:
-      image-tag: ${{ steps.meta.outputs.version }}
+      # NE steps.meta.outputs.version: metadata-action tu vraća tag najvišeg
+      # prioriteta, a to je `latest` — server je tako dobijao IMAGE_TAG=latest,
+      # a deploy.sh (koji prima samo sha-<hex>) bi takav deploy odbio.
+      image-tag: ${{ steps.tag.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v4
@@ -71,6 +74,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Tag iz commita koji je STVARNO izgrađen (isti ref kao checkout iznad),
+      # da slika, tag i deploy uvek pokazuju na isti commit.
+      - name: Tag verzije
+        id: tag
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: echo "tag=sha-${SHA::7}" >> "$GITHUB_OUTPUT"
+
       - name: Odredi tagove
         id: meta
         uses: docker/metadata-action@v6
@@ -78,7 +89,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
             type=raw,value=latest
-            type=sha,prefix=sha-,format=short
+            type=raw,value=${{ steps.tag.outputs.tag }}
 
       - name: Postavi Buildx
         uses: docker/setup-buildx-action@v3
