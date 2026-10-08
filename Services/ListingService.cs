@@ -568,6 +568,9 @@ public sealed class ListingService(
         if (listing is null)
             return (false, "Listing nije pronađen ili nemate pravo izmene.");
 
+        if (listing.Status == ListingStatus.Archived)
+            return (false, ArhiviranPoruka);
+
         var category = await db.Categories.FindAsync(dto.CategoryId);
         if (category is null)
             return (false, $"Kategorija sa Id={dto.CategoryId} ne postoji.");
@@ -600,6 +603,32 @@ public sealed class ListingService(
         if (listing is null)
             return (false, "Listing nije pronađen ili nemate pravo izmene.");
 
+        // Oglas uklonjen odlukom admina se ne vraća u promet pozivom API-ja.
+        // Filter u GetByProviderAsync ga sakriva iz liste, ali lista nije
+        // zaštita — zaštita je ovde, gde se promena stvarno dešava.
+        if (listing.ModerationState == ModerationState.Removed)
+            return (false, "Oglas je uklonjen zbog kršenja uslova korišćenja.");
+
+        // TotalListings mora da prati prelazak preko granice arhive.
+        //
+        // Ranije je brojač smanjivao samo DeleteAsync, a ovaj metod ga nije
+        // dirao — pa je arhiviranje preko dugmeta ostavljalo naduvan broj
+        // oglasa na profilu, a vraćanje iz arhive ga nikad nije vratilo.
+        var biloArhivirano = listing.Status == ListingStatus.Archived;
+        var bicearhivirano = newStatus     == ListingStatus.Archived;
+
+        if (biloArhivirano != bicearhivirano)
+        {
+            var provider = await db.ProviderProfiles
+                .FirstOrDefaultAsync(p => p.UserId == userId);
+
+            if (provider is not null)
+            {
+                if (bicearhivirano && provider.TotalListings > 0) provider.TotalListings--;
+                else if (!bicearhivirano)                        provider.TotalListings++;
+            }
+        }
+
         listing.Status    = newStatus;
         listing.UpdatedAt = DateTime.UtcNow;
 
@@ -618,6 +647,11 @@ public sealed class ListingService(
         if (listing is null)
             return (false, "Listing nije pronađen ili nemate pravo brisanja.");
 
+        // Već arhiviran — nema šta da se arhivira drugi put. Bez ove provere
+        // bi se TotalListings smanjivao pri svakom pozivu.
+        if (listing.Status == ListingStatus.Archived)
+            return (true, null);
+
         listing.Status    = ListingStatus.Archived;
         listing.UpdatedAt = DateTime.UtcNow;
 
@@ -628,6 +662,86 @@ public sealed class ListingService(
             provider.TotalListings--;
 
         await db.SaveChangesAsync();
+        return (true, null);
+    }
+
+    // ── TRAJNO BRISANJE ────────────────────────────────────────────────────
+    /// <summary>
+    /// Fizički briše oglas iz baze. Nepovratno.
+    ///
+    /// ZAŠTO SAMO IZ ARHIVE
+    /// Traži se da oglas već bude arhiviran. Brisanje je time dvokoračno i ne
+    /// može se desiti jednim promašenim dodirom na listi aktivnih oglasa.
+    ///
+    /// ZAŠTO SE ODBIJA KAD POSTOJI ISTORIJA
+    /// Strani ključevi to delom već nameću, delom ne — i baš tu drugu polovinu
+    /// treba zaustaviti u kodu:
+    ///
+    ///   BookingRequests        → Restrict  (baza bi svejedno pukla)
+    ///   DiscountTokenOffers    → Restrict  (isto)
+    ///   Reviews                → CASCADE   (baza bi ih tiho obrisala!)
+    ///
+    /// Kaskada nad recenzijama je opasna: uslugodavac sa lošom ocenom bi je
+    /// uklonio tako što obriše oglas. Time bi ocena nestala i sa njegovog
+    /// profila, jer se prosek računa iz istih redova. Recenzije nisu njegove da
+    /// ih briše — one su tuđe reči o obavljenom poslu.
+    ///
+    /// Zato se ovde proverava PRE brisanja, i vraća se objašnjenje umesto
+    /// izuzetka iz baze.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> DeletePermanentlyAsync(
+        int listingId, string userId)
+    {
+        var listing = await GetOwnedListingAsync(listingId, userId);
+        if (listing is null)
+            return (false, "Oglas nije pronađen ili nemate pravo brisanja.");
+
+        if (listing.Status != ListingStatus.Archived)
+            return (false, "Oglas se prvo mora arhivirati, pa tek onda trajno obrisati.");
+
+        if (await db.BookingRequests.AnyAsync(b => b.ListingId == listingId))
+            return (false,
+                "Oglas ima rezervacije i ne može se trajno obrisati. " +
+                "Ostaje arhiviran, van pretrage.");
+
+        if (await db.Reviews.AnyAsync(r => r.ListingId == listingId))
+            return (false,
+                "Oglas ima recenzije i ne može se trajno obrisati. " +
+                "Ostaje arhiviran, van pretrage.");
+
+        if (await db.DiscountTokenOffers.AnyAsync(o => o.ListingId == listingId))
+            return (false,
+                "Oglas ima ponude popusta i ne može se trajno obrisati. " +
+                "Ostaje arhiviran, van pretrage.");
+
+        // Fajlovi se brišu PRE reda u bazi.
+        //
+        // Obrnutim redom, pad brisanja fajlova bi ostavio slike na disku bez
+        // ijednog reda koji na njih pokazuje — smeće koje niko više ne može da
+        // poveže sa oglasom. Ovako, ako brisanje fajlova pukne, red je još tu i
+        // pokušaj se može ponoviti.
+        var uploadDir = Path.Combine(
+            env.WebRootPath, "uploads", "listings", listingId.ToString());
+
+        try
+        {
+            if (Directory.Exists(uploadDir))
+                Directory.Delete(uploadDir, recursive: true);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Brisanje foldera sa slikama nije uspelo za oglas {ListingId}. " +
+                "Red se svejedno briše; folder ostaje kao smeće.", listingId);
+        }
+
+        // ListingImages, ListingBoosts i FavoriteListings odlaze kaskadom.
+        db.Listings.Remove(listing);
+        await db.SaveChangesAsync();
+
+        logger.LogInformation(
+            "Oglas {ListingId} trajno obrisan (korisnik {UserId})", listingId, userId);
+
         return (true, null);
     }
 
@@ -642,6 +756,9 @@ public sealed class ListingService(
         var listing = await GetOwnedListingAsync(listingId, userId);
         if (listing is null)
             return (null, "Listing nije pronađen ili nemate pravo izmene.");
+
+        if (listing.Status == ListingStatus.Archived)
+            return (null, ArhiviranPoruka);
 
         // Učitaj slike
         var existingImages = await db.ListingImages
@@ -707,6 +824,9 @@ public sealed class ListingService(
         if (listing is null)
             return (false, "Listing nije pronađen ili nemate pravo izmene.");
 
+        if (listing.Status == ListingStatus.Archived)
+            return (false, ArhiviranPoruka);
+
         var image = await db.ListingImages
             .FirstOrDefaultAsync(i => i.Id == imageId && i.ListingId == listingId);
 
@@ -741,8 +861,21 @@ public sealed class ListingService(
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
+            // BEZ filtera na status. Ovo je VLASNIKOVA lista, ne javna —
+            // arhivirani oglasi moraju da se vide u svom tabu, inače tab
+            // „Arhivirani" u aplikaciji nikad nema šta da prikaže, a oglas
+            // posle arhiviranja nestaje bez traga i ne može se vratiti.
+            //
+            // Javna pretraga (Search) i GetById imaju svoje filtere i njih ovo
+            // ne dira — arhiviran oglas i dalje ne postoji za strance.
+            //
+            // IZUZETAK: oglasi koje je UKLONIO ADMIN ostaju nevidljivi i
+            // vlasniku. Da se prikazuju, vlasnik bi ih video u tabu
+            // „Arhivirani" zajedno sa svojima i jednim dodirom vratio u
+            // aktivne — čime bi moderacija postala predlog. Vlasnik o uklanjanju
+            // svejedno zna: dobija obaveštenje ListingRemoved sa razlogom.
             .Where(l => l.ProviderProfile.UserId == userId &&
-                        l.Status != ListingStatus.Archived)
+                        l.ModerationState != ModerationState.Removed)
             .OrderByDescending(l => l.CreatedAt)
             .Select(l => MapToDto(l))
             .ToListAsync();
@@ -750,16 +883,30 @@ public sealed class ListingService(
 
     // ── HELPERS ────────────────────────────────────────────────────────────
 
-    /// <summary>Vraća listing samo ako mu je userId vlasnik.</summary>
+    /// <summary>
+    /// Vraća listing samo ako mu je userId vlasnik. <b>Status se NE proverava.</b>
+    ///
+    /// Ranije je ovde stajalo i <c>Status != Archived</c>, pa su svih pet
+    /// pozivalaca dobijali isto ponašanje — uključujući i onaj koji vraća oglas
+    /// IZ arhive. Posledica: arhiviran oglas se nije mogao ni vratiti ni
+    /// izmeniti, a vlasniku se uz to nije ni prikazivao (vidi GetByProviderAsync).
+    /// Oglas bi time nestao zauvek.
+    ///
+    /// Provera statusa je zato prebačena na pozivaoce — svaki sam odlučuje da li
+    /// arhiviran oglas prihvata, i vraća poruku koja kaže šta da se uradi.
+    /// </summary>
     private async Task<Listing?> GetOwnedListingAsync(int listingId, string userId)
     {
         return await db.Listings
             .Include(l => l.ProviderProfile)
             .FirstOrDefaultAsync(l =>
                 l.Id == listingId &&
-                l.ProviderProfile.UserId == userId &&
-                l.Status != ListingStatus.Archived);
+                l.ProviderProfile.UserId == userId);
     }
+
+    /// <summary>Poruka koja se vraća kad radnja nema smisla nad arhiviranim oglasom.</summary>
+    private const string ArhiviranPoruka =
+        "Oglas je arhiviran. Vrati ga u aktivne da bi ga menjao.";
 
     private static string? ValidatePrice(
         PriceMode mode, decimal? fixed_, decimal? from, decimal? to)
