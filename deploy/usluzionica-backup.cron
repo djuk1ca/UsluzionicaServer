@@ -1,0 +1,8 @@
+# /etc/cron.d/usluzionica-backup — noćni backup baze i slika (deploy/backup.sh).
+# 03:30 po vremenu servera; flock sprečava da se dva backup-a preklope.
+# Fajl mora da se završava praznim redom, inače cron ignoriše poslednji red.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+30 3 * * * deploy flock -n /tmp/usluzionica-backup.lock /opt/usluzionica/backup.sh >> /opt/usluzionica/backup.log 2>&1
+

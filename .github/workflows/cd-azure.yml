@@ -343,9 +343,9 @@ jobs:
 
             if [[ "$CODE" == "200" ]]; then
               echo "Zdrav posle $((i*10)) s: $(cat /tmp/health.txt)"
-              echo "### Deploy uspešan — /health vraća 200" >> $GITHUB_STEP_SUMMARY
-              echo "" >> $GITHUB_STEP_SUMMARY
-              echo "$URL" >> $GITHUB_STEP_SUMMARY
+              echo "### Deploy uspešan — /health vraća 200" >> "$GITHUB_STEP_SUMMARY"
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+              echo "$URL" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
 
@@ -365,13 +365,13 @@ jobs:
       - name: Uputstvo za rollback ako je palo
         if: failure()
         run: |
-          echo "### Deploy pao — rollback" >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo "az webapp config container set \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --name ${{ vars.AZURE_WEBAPP_NAME }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \\" >> $GITHUB_STEP_SUMMARY
-          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:sha-PRETHODNI" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy pao — rollback" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "az webapp config container set \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --name ${{ vars.AZURE_WEBAPP_NAME }} \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --resource-group ${{ vars.AZURE_RESOURCE_GROUP }} \\" >> "$GITHUB_STEP_SUMMARY"
+          echo "  --docker-custom-image-name ${{ env.REGISTRY }}/${{ needs.build-and-push.outputs.image-name }}:sha-PRETHODNI" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ŠTA TREBA PODESITI PRE PRVOG POKRETANJA
