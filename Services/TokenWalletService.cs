@@ -127,7 +127,7 @@ public sealed class TokenWalletService(
             dto.ReceiverId,
             NotificationKind.DiscountOfferReceived,
             "Primili ste token ponudu",
-            $"{sender.FullName} nudi {dto.TokenAmount:0.##} tokena za \"{listing.Title}\".",
+            $"{sender.FullName} nudi {dto.TokenAmount:0.##} tokena za „{listing.Title}“.",
             offer.Id);
 
         // Ručno popuni navigacije za mapping (bez ponovnog DB upita)
@@ -236,7 +236,7 @@ public sealed class TokenWalletService(
             offer.SenderId,
             NotificationKind.DiscountOfferAccepted,
             "Ponuda prihvaćena!",
-            $"Vaša ponuda od {offer.TokenAmount:0.##} tokena za \"{offer.Listing.Title}\" je prihvaćena.",
+            $"Vaša ponuda od {offer.TokenAmount:0.##} tokena za „{offer.Listing.Title}“ je prihvaćena.",
             offer.Id);
 
         logger.LogInformation(
@@ -269,7 +269,7 @@ public sealed class TokenWalletService(
             offer.SenderId,
             NotificationKind.DiscountOfferRejected,
             "Ponuda odbijena",
-            $"Vaša ponuda od {offer.TokenAmount:0.##} tokena za \"{offer.Listing.Title}\" je odbijena.",
+            $"Vaša ponuda od {offer.TokenAmount:0.##} tokena za „{offer.Listing.Title}“ je odbijena.",
             offer.Id);
 
         return (true, null);

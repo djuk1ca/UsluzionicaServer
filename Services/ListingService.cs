@@ -119,6 +119,15 @@ public sealed class ListingService(
         // Blokirani, u oba smera.
         query = BlockService.FilterBlocked(query, db, p.ViewerUserId);
 
+        // Samo istaknuti. Rok se proverava i ovde, ne samo IsBoosted: zastavicu
+        // gasi BoostExpiryService jednom na sat, pa bi istekao boost do sat
+        // vremena i dalje stajao u „Istaknuto".
+        if (p.IsBoosted == true)
+        {
+            var sada = DateTime.UtcNow;
+            query = query.Where(l => l.IsBoosted && (l.BoostExpiresAt == null || l.BoostExpiresAt > sada));
+        }
+
         // Filter po kategoriji (slug) — roditelj povlači i podkategorije.
         if (!string.IsNullOrWhiteSpace(p.CategorySlug))
         {
@@ -382,10 +391,16 @@ public sealed class ListingService(
     {
         var total = knownTotal ?? await query.CountAsync();
 
-        var items = await query
-            .OrderByDescending(l => l.IsBoosted)
-            .ThenByDescending(l => l.BoostScore)
-            .ThenByDescending(l => l.CreatedAt)
+        // „Novo" mora biti stvarno najnovije: sa podrazumevanim redosledom
+        // istaknuti oglasi zauzmu vrh, početna ih izbaci kao već prikazane u
+        // „Istaknuto", i sekcija „Novo" ostane prazna.
+        var poredak = string.Equals(p.Sort, "newest", StringComparison.OrdinalIgnoreCase)
+            ? query.OrderByDescending(l => l.CreatedAt).ThenByDescending(l => l.Id)
+            : query.OrderByDescending(l => l.IsBoosted)
+                   .ThenByDescending(l => l.BoostScore)
+                   .ThenByDescending(l => l.CreatedAt);
+
+        var items = await poredak
             .Skip((p.Page - 1) * p.PageSize)
             .Take(p.PageSize)
             .ToListAsync();

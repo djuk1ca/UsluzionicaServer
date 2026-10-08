@@ -58,6 +58,17 @@
 	@kompresija not path /hubs/*
 	encode @kompresija zstd gzip
 
+	# ── Stare pozivnice ────────────────────────────────────────────────────
+	# Do Marketing P0 aplikacija je delila api.usluzionica.rs/register?ref=KOD,
+	# a ta stranica na API-ju nikad nije postojala (404). Linkovi su već poslati
+	# porukama i ne mogu se povući — zato se preusmeravaju na pravu stranicu
+	# pozivnice na sajtu. Host je fiksan, pa ovo nije otvoren redirect.
+	@staraPozivnica {
+		path /register
+		query ref=*
+	}
+	redir @staraPozivnica https://{$APP_DOMAIN}/pozivnica/{query.ref} permanent
+
 	# ── SignalR ────────────────────────────────────────────────────────────
 	# Chat ide preko WebSocket-a. Caddy prosleđuje Upgrade zaglavlja sam, ali
 	# podrazumevani timeout od nekoliko sekundi bi rušio žive konekcije, pa se

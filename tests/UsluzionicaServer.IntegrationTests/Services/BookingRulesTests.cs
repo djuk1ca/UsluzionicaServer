@@ -109,6 +109,70 @@ public class BookingRulesTests(DatabaseFixture fixture) : IntegrationTestBase(fi
         booking.AcceptedAt.Should().BeNull("nov zahtev još nije prihvaćen");
     }
 
+    [Fact]
+    public async Task ZahtevKodUslugodavca_NosiCenuOglasa()
+    {
+        // Kartica na „Zahtevi za zakazivanje" prikazuje cenu — bez toga
+        // uslugodavac mora da otvara oglas da bi znao na šta se zahtev odnosi.
+        var (klijentId, provajderId, listingId) = await PripremiAsync();
+        await KreirajAsync(klijentId, listingId);
+
+        var dolazni = await WithService<BookingService, List<BookingDto>>(
+            svc => svc.GetIncomingAsync(provajderId));
+
+        var z = dolazni.Should().ContainSingle().Subject;
+        z.PriceMode.Should().Be(nameof(PriceMode.Fixed));
+        z.FixedPrice.Should().Be(2000m);   // TestData.CreateActiveListingAsync
+    }
+
+    // ── Odbrojavanje i podsetnik za „Izvršeno" ─────────────────────────────
+
+    [Fact]
+    public async Task PrihvacenZahtev_NosiTrenutakOdKadSeMozeIzvrsiti()
+    {
+        // Aplikacija po CanExecuteAt prikazuje odbrojavanje; mora biti tačno
+        // AcceptedAt + ExecuteAfterDays, inače bi dugme i server rekli različito.
+        var (klijentId, provajderId, listingId) = await PripremiAsync();
+        var (booking, _) = await KreirajAsync(klijentId, listingId);
+        await PotvrdiAsync(booking!.Id, provajderId);
+
+        var z = (await WithService<BookingService, List<BookingDto>>(
+            svc => svc.GetIncomingAsync(provajderId))).Single();
+
+        z.ExecuteAfterDays.Should().Be(DanaDoIzvrsenja);
+        z.CanExecuteAt.Should().Be(z.AcceptedAt!.Value.AddDays(DanaDoIzvrsenja));
+        z.CanExecute.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Podsetnik_KadCekanjeIstekne_StizeUslugodavcuJednom()
+    {
+        var (klijentId, provajderId, listingId) = await PripremiAsync();
+        var (booking, _) = await KreirajAsync(klijentId, listingId);
+        await PotvrdiAsync(booking!.Id, provajderId);
+        await PomeriPrihvatanjeUProslostAsync(booking.Id, DanaDoIzvrsenja + 1);
+
+        var prvi  = await WithService<PodsetnikZaIzvrsenje, int>(svc => svc.PosaljiAsync());
+        var drugi = await WithService<PodsetnikZaIzvrsenje, int>(svc => svc.PosaljiAsync());
+
+        prvi.Should().Be(1);
+        drugi.Should().Be(0, "isti podsetnik se ne šalje dvaput");
+        (await Query(db => db.Notifications.CountAsync(n =>
+            n.UserId == provajderId && n.Kind == NotificationKind.BookingExecutable && n.ReferenceId == booking.Id)))
+            .Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Podsetnik_PreIstekaCekanja_NeStize()
+    {
+        var (klijentId, provajderId, listingId) = await PripremiAsync();
+        var (booking, _) = await KreirajAsync(klijentId, listingId);
+        await PotvrdiAsync(booking!.Id, provajderId);
+        await PomeriPrihvatanjeUProslostAsync(booking.Id, DanaDoIzvrsenja - 1);
+
+        (await WithService<PodsetnikZaIzvrsenje, int>(svc => svc.PosaljiAsync())).Should().Be(0);
+    }
+
     // ── 2. Duplikat odbijen ────────────────────────────────────────────────
 
     [Fact]

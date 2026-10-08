@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Skripte za server (deploy/) se kopiraju na Linux — CRLF bi ih oborio
+# („/usr/bin/env: bash: No such file or directory").
+*.sh text eol=lf

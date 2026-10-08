@@ -12,6 +12,18 @@ public sealed class BookingDto
     public int     ListingId      { get; set; }
     public string  ListingTitle   { get; set; } = string.Empty;
 
+    // Cena oglasa — kartica zahteva kod uslugodavca je prikazuje, da ne mora
+    // da otvara oglas da bi znao o čemu je reč.
+    /// <summary>Fixed | Range | Negotiable — isto kao na oglasu.</summary>
+    public string   PriceMode       { get; set; } = string.Empty;
+    public decimal? FixedPrice      { get; set; }
+    public decimal? PriceFrom       { get; set; }
+    public decimal? PriceTo         { get; set; }
+
+    // RequestedDate/RequestedTime se NAMERNO ne šalju: CreateAsync ih danas
+    // puni trenutkom pravljenja (placeholder do zakazivanja termina), pa bi
+    // ih aplikacija prikazala kao „termin" koji klijent nikad nije izabrao.
+
     public string  ClientId       { get; set; } = string.Empty;
     public string  ClientName     { get; set; } = string.Empty;
     public string? ClientImageUrl { get; set; }
@@ -26,11 +38,20 @@ public sealed class BookingDto
 
     public DateTime  CreatedAt    { get; set; }
 
-    /// <summary>Postavljeno kad provider potvrdi — osnova za 3-dnevno pravilo.</summary>
+    /// <summary>Postavljeno kad provider potvrdi — osnova za pravilo čekanja.</summary>
     public DateTime? AcceptedAt   { get; set; }
 
+    /// <summary>Koliko dana posle prihvatanja „Izvršeno" postaje dostupno (Booking:ExecuteAfterDays).</summary>
+    public int       ExecuteAfterDays { get; set; }
+
     /// <summary>
-    /// True ako je booking Confirmed I prošlo je 3+ dana od potvrde.
+    /// Trenutak (UTC) od kog provider može da označi uslugu kao izvršenu —
+    /// aplikacija po njemu prikazuje odbrojavanje. Null dok zahtev nije prihvaćen.
+    /// </summary>
+    public DateTime? CanExecuteAt { get; set; }
+
+    /// <summary>
+    /// True ako je booking Confirmed I prošlo je ExecuteAfterDays dana od potvrde.
     /// Provider može pritisnuti Execute samo kad je CanExecute = true.
     /// </summary>
     public bool CanExecute { get; set; }

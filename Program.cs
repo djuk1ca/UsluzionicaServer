@@ -276,6 +276,7 @@ builder.Services.AddScoped<ProviderService>();
 builder.Services.AddScoped<ReferralService>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddScoped<BookingService>();
+builder.Services.AddScoped<PodsetnikZaIzvrsenje>();
 builder.Services.AddScoped<ReviewService>();
 builder.Services.AddScoped<FavoriteService>();
 builder.Services.AddScoped<NotificationService>();
@@ -360,6 +361,8 @@ builder.Services.AddSingleton<CategorySearchIndex>();
 builder.Services.AddHostedService<MessageCleanupService>();
 // Background servis za isticanje boost-ova (svakih sat)
 builder.Services.AddHostedService<BoostExpiryService>();
+// Podsetnik uslugodavcu kad „Izvršeno" postane dostupno (svakih 15 min)
+builder.Services.AddHostedService<PodsetnikZaIzvrsenjeService>();
 
 // ── Controllers + Swagger ─────────────────────────────────────────────────
 // Slike se u bazi čuvaju relativno; pun URL se sastavlja pri serijalizaciji.
@@ -570,6 +573,11 @@ if (!string.IsNullOrWhiteSpace(redisConn))
     healthChecks.AddRedis(redisConn, name: "redis", tags: ["cache"]);
 
 var app = builder.Build();
+
+// Ključevi za poruke se proveravaju ODMAH: pogrešan Encryption:CurrentKeyId ili
+// neispravan Encryption:Keys:* ruši start (deploy ne prođe health check), a ne
+// prvu poruku nekog korisnika sat vremena kasnije.
+app.Services.GetRequiredService<MessageEncryption>();
 
 // ── Migrate + Seed ─────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())

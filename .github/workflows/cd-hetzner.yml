@@ -120,48 +120,38 @@ jobs:
           username: ${{ secrets.HETZNER_USER }}
           key:      ${{ secrets.HETZNER_SSH_KEY }}
           port:     ${{ secrets.HETZNER_SSH_PORT || 22 }}
+          # Otisak ključa SERVERA (ne našeg): bez njega bi se runner povezao i
+          # na lažni server postavljen usred puta. Prazan secret = bez provere
+          # (stanje pre C3); vrednost: `ssh-keygen -lf
+          # /etc/ssh/ssh_host_ed25519_key.pub -E sha256` → deo „SHA256:…".
+          fingerprint: ${{ secrets.HETZNER_HOST_FINGERPRINT }}
           # Bez ovoga se komande izvršavaju u login shell-u bez `set -e`, pa bi
           # neuspeo `pull` prošao neprimećeno a `up -d` digao staru sliku.
           script_stop: true
+          # ── ZAŠTO SKRIPTA IZGLEDA OVAKO (C3) ─────────────────────────────
+          # Ceo deploy je u /opt/usluzionica/deploy.sh (deploy/deploy.sh u
+          # repou). Posle C3 ključ za CD u authorized_keys ima forced command:
+          # sshd IGNORIŠE ovaj tekst i pokreće deploy.sh, koji iz njega čita
+          # SAMO `DEPLOY_TAG=sha-…`. Zato:
+          #   • DEPLOY_TAG= sme da se pojavi TAČNO JEDNOM u tekstu ispod,
+          #   • komentari NE idu u blok `script` (i oni se šalju na server),
+          #   • deo posle `fi` je stari deploy, za server na kom deploy.sh još ne
+          #     postoji — redosled koraka C3 tako ne može da obori CD.
           script: |
             set -euo pipefail
-            cd /opt/usluzionica
-
-            # Prijava na GHCR samo ako je token postavljen.
-            #
-            # Paket `usluzionicaserver` je JAVAN, pa se povlači anonimno i login
-            # nije potreban — jedan secret manje za pravljenje i rotiranje.
-            # Uslov postoji da bi isti workflow radio i ako paket ikad postane
-            # privatan: tada se doda GHCR_TOKEN (PAT sa `read:packages`) i
-            # prijava se uključuje sama, bez izmene koda.
-            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
-              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io \
-                -u ${{ github.actor }} --password-stdin
+            if [ -x /opt/usluzionica/deploy.sh ]; then
+              /opt/usluzionica/deploy.sh "DEPLOY_TAG=${{ needs.build-and-push.outputs.image-tag }}"
+              exit 0
             fi
-
-            # Tag koji se deployuje upisujemo u .env; compose ga čita kao
-            # ${IMAGE_TAG}. Tako server uvek zna TAČNO koja verzija se vrti,
-            # i rollback je izmena jedne linije + `up -d`.
-            TAG="${{ needs.build-and-push.outputs.image-tag }}"
+            echo "deploy.sh ne postoji na serveru, stari nacin (vidi C3)"
+            cd /opt/usluzionica
+            if [ -n "${{ secrets.GHCR_TOKEN }}" ]; then
+              echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            fi
             sed -i "/^IMAGE_TAG=/d" .env
-            echo "IMAGE_TAG=${TAG}" >> .env
-            echo "Deployujem tag: ${TAG}"
-
+            echo "IMAGE_TAG=${{ needs.build-and-push.outputs.image-tag }}" >> .env
             docker compose -f docker-compose.yml -f docker-compose.prod.yml pull api
             docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api
-
-            # ── ČIŠĆENJE STARIH SLIKA ────────────────────────────────────
-            # Svaki deploy povlači novu `sha-` sliku od ~390 MB, a stare ostaju.
-            # Na disku od 40 GB to se primeti za par meseci.
-            #
-            # `prune -f` BEZ `-a` briše samo *dangling* slike — one koje su
-            # ostale bez taga. Naše stare verzije taj tag imaju (`sha-a1b2c3d`),
-            # pa ih taj oblik komande uopšte ne dira. Otud `-a`.
-            #
-            # `until=168h` čuva sve iz poslednjih 7 dana, pa nekoliko prethodnih
-            # verzija ostaje na disku za brz rollback bez ponovnog povlačenja.
-            # Slike koje trenutno koristi neki kontejner se ne brišu bez obzira
-            # na starost, pa su `mssql`, `redis` i `caddy` bezbedni.
             docker image prune -af --filter "until=168h"
 
       # ── SMOKE TEST ───────────────────────────────────────────────────────
@@ -178,7 +168,7 @@ jobs:
 
             if [[ "$CODE" == "200" ]]; then
               echo "Zdrav posle $((i*5)) s: $(cat /tmp/health.txt)"
-              echo "### Deploy uspešan — /health vraća 200" >> $GITHUB_STEP_SUMMARY
+              echo "### Deploy uspešan — /health vraća 200" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
 
@@ -192,13 +182,17 @@ jobs:
       - name: Uputstvo za rollback ako je palo
         if: failure()
         run: |
-          echo "### Deploy pao — rollback" >> $GITHUB_STEP_SUMMARY
-          echo 'Na serveru:' >> $GITHUB_STEP_SUMMARY
-          echo '```bash' >> $GITHUB_STEP_SUMMARY
-          echo 'cd /opt/usluzionica' >> $GITHUB_STEP_SUMMARY
-          echo 'sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=sha-PRETHODNI/" .env' >> $GITHUB_STEP_SUMMARY
-          echo 'docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "### Deploy pao — rollback" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Na serveru:' >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo '/opt/usluzionica/deploy.sh DEPLOY_TAG=sha-PRETHODNI' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Prethodni tag ispisuje log koraka „Deploy preko SSH-a" (red „Rollback:"). Bez deploy.sh:' >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo 'cd /opt/usluzionica' >> "$GITHUB_STEP_SUMMARY"
+          echo 'sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=sha-PRETHODNI/" .env' >> "$GITHUB_STEP_SUMMARY"
+          echo 'docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ŠTA TREBA PODESITI (kad uzmeš server)

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.DTOs.Listings;
 using UsluzionicaServer.IntegrationTests.Infrastructure;
 using UsluzionicaServer.Services;
@@ -325,5 +326,67 @@ public class ListingSearchTests(DatabaseFixture fixture) : IntegrationTestBase(f
         result.Items.Should().HaveCount(3);
         result.Items[0].Id.Should().Be(boostovan);
         result.Items.Select(i => i.Id).Should().Contain(obican);
+    }
+
+    // ── Početna: „Istaknuto" i „Novo" (A3) ─────────────────────────────────
+
+    private async Task<int> BoostujAsync(int listingId, string providerId)
+    {
+        await WithService<BoostService>(async svc =>
+        {
+            var (ok, err) = await svc.BoostListingAsync(listingId, providerId,
+                new UsluzionicaServer.DTOs.Tokens.BoostListingDto { TokensToSpend = 10m, DurationDays = 7 });
+            ok.Should().BeTrue(err);
+        });
+        return listingId;
+    }
+
+    private Task<PagedResult<ListingDto>> Pocetna(bool? isBoosted = null, string? sort = null) =>
+        WithService<ListingService, PagedResult<ListingDto>>(svc =>
+            svc.SearchAsync(new ListingQueryParams { IsBoosted = isBoosted, Sort = sort, Page = 1, PageSize = 50 }));
+
+    [Fact]
+    public async Task Istaknuto_VracaSamoBoostovaneOglase()
+    {
+        // RANIJE PADALO: `?isBoosted=true` je tiho ignorisan, pa je „Istaknuto"
+        // dobijalo SVE oglase — isto što i „Novo".
+        var (provider, _) = await Data.CreateProviderAsync("istaknuto@test.rs", tokenBalance: 100m);
+        var boostovan = await BoostujAsync(
+            await Data.CreateActiveListingAsync(provider.Id, title: "Istaknut oglas"), provider.Id);
+        await Data.CreateActiveListingAsync(provider.Id, title: "Običan oglas");
+
+        var result = await Pocetna(isBoosted: true);
+
+        result.Items.Should().ContainSingle().Which.Id.Should().Be(boostovan);
+    }
+
+    [Fact]
+    public async Task Istaknuto_IstekaoBoost_NeUlazi()
+    {
+        // Zastavicu IsBoosted gasi pozadinski servis jednom na sat — do tada
+        // istekao boost ne sme da stoji u „Istaknuto".
+        var (provider, _) = await Data.CreateProviderAsync("istekao@test.rs", tokenBalance: 100m);
+        var id = await BoostujAsync(
+            await Data.CreateActiveListingAsync(provider.Id, title: "Boost istekao"), provider.Id);
+
+        await Query(db => db.Listings.Where(l => l.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(l => l.BoostExpiresAt, DateTime.UtcNow.AddMinutes(-5))));
+
+        (await Pocetna(isBoosted: true)).Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Novo_NajnovijiPrvi_BezObziraNaBoost()
+    {
+        // RANIJE PADALO: „Novo" je dobijalo istaknute na vrhu, početna ih je
+        // izbacivala kao već prikazane — i sekcija je ostajala prazna.
+        var (provider, _) = await Data.CreateProviderAsync("novo@test.rs", tokenBalance: 100m);
+        await BoostujAsync(await Data.CreateActiveListingAsync(provider.Id, title: "Stari istaknut"), provider.Id);
+        await Task.Delay(20);
+        var najnoviji = await Data.CreateActiveListingAsync(provider.Id, title: "Najnoviji oglas");
+
+        var result = await Pocetna(sort: "newest");
+
+        result.Items.First().Id.Should().Be(najnoviji);
     }
 }

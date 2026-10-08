@@ -27,5 +27,11 @@ public enum NotificationKind
     ListingRemoved,
 
     /// <summary>Nalog deaktiviran zbog kršenja uslova korišćenja.</summary>
-    AccountDeactivated
+    AccountDeactivated,
+
+    /// <summary>
+    /// Provider: isteklo je čekanje posle prihvatanja i usluga sada može da se
+    /// označi kao izvršena. Šalje PodsetnikZaIzvrsenje, jednom po zahtevu.
+    /// </summary>
+    BookingExecutable
 }

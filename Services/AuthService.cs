@@ -68,22 +68,19 @@ public sealed class AuthService(
         //    koji se čuva interno (AspNetUserTokens tabela) i važi 24 sata (default Identity)
         try
         {
-            var token     = await userManager.GenerateEmailConfirmationTokenAsync(user);
-            var baseUrl   = config["App:BaseUrl"] ?? "https://localhost:7001";
-            // Token može sadržati specijalne znakove → URL encode
-            var verifyUrl = $"{baseUrl}/api/auth/verify-email" +
-                            $"?userId={Uri.EscapeDataString(user.Id)}" +
-                            $"&token={Uri.EscapeDataString(token)}";
+            var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
 
-            await emailService.SendVerificationEmailAsync(user.Email!, user.FullName, verifyUrl);
+            await emailService.SendVerificationEmailAsync(
+                user.Email!, user.FullName, VerifikacioniLink(user.Id, token));
         }
         catch (Exception ex)
         {
-            // Neuspešan email ne poništava registraciju — korisnik može tražiti resend
-            logger.LogError(ex, "Email verifikacija nije poslata korisniku {Email}.", req.Email);
+            // Neuspešan email ne poništava registraciju — korisnik može tražiti resend.
+            // Id, ne mejl: adresa je lični podatak i ne ide u log (CodeQL).
+            logger.LogError(ex, "Email verifikacija nije poslata korisniku {UserId}.", user.Id);
         }
 
-        logger.LogInformation("Novi korisnik registrovan: {Email}", req.Email);
+        logger.LogInformation("Novi korisnik registrovan: {UserId}", user.Id);
 
         return (true, []);
     }
@@ -100,7 +97,7 @@ public sealed class AuthService(
         // 1a. Nalog privremeno zaključan zbog previše promašaja
         if (await userManager.IsLockedOutAsync(user))
         {
-            logger.LogWarning("Pokušaj prijave na zaključan nalog: {Email}", req.Email);
+            logger.LogWarning("Pokušaj prijave na zaključan nalog: {UserId}", user.Id);
             return (null, "Nalog je privremeno zaključan zbog previše neuspelih pokušaja. Pokušaj ponovo za 15 minuta.");
         }
 
@@ -273,7 +270,7 @@ public sealed class AuthService(
 
         await db.SaveChangesAsync();
 
-        logger.LogInformation("Refresh token rotiran za korisnika: {Email}", user.Email);
+        logger.LogInformation("Refresh token rotiran za korisnika: {UserId}", user.Id);
 
         return (new AuthResponse
         {
@@ -321,20 +318,28 @@ public sealed class AuthService(
 
         try
         {
-            var token     = await userManager.GenerateEmailConfirmationTokenAsync(user);
-            var baseUrl   = config["App:BaseUrl"] ?? "https://localhost:7176";
-            var verifyUrl = $"{baseUrl}/api/auth/verify-email" +
-                            $"?userId={Uri.EscapeDataString(user.Id)}" +
-                            $"&token={Uri.EscapeDataString(token)}";
+            var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
 
-            await emailService.SendVerificationEmailAsync(user.Email!, user.FullName, verifyUrl);
-            logger.LogInformation("Verifikacioni email ponovo poslat na: {Email}", email);
+            await emailService.SendVerificationEmailAsync(
+                user.Email!, user.FullName, VerifikacioniLink(user.Id, token));
+
+            // Id, ne mejl: adresa je lični podatak i ne ide u log (CodeQL).
+            logger.LogInformation("Verifikacioni email ponovo poslat korisniku {UserId}", user.Id);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Resend verifikacije nije uspeo za: {Email}", email);
+            logger.LogError(ex, "Resend verifikacije nije uspeo za korisnika {UserId}", user.Id);
         }
     }
+
+    /// <summary>
+    /// Link za potvrdu mejla — JEDNO mesto za adresu. Ranije su registracija i
+    /// ponovno slanje imali različit fallback (:7001 i :7176), pa je ponovo
+    /// poslat mejl lokalno vodio na drugi port od prvog.
+    /// </summary>
+    private string VerifikacioniLink(string userId, string token) =>
+        $"{(config["App:BaseUrl"] ?? "https://localhost:7176").TrimEnd('/')}/api/auth/verify-email" +
+        $"?userId={Uri.EscapeDataString(userId)}&token={Uri.EscapeDataString(token)}";
 
     // ── FORGOT PASSWORD ────────────────────────────────────────────────────
     private const int ResetCodeValidMinutes = 15;
@@ -350,7 +355,7 @@ public sealed class AuthService(
         var user = await userManager.FindByEmailAsync(email);
         if (user is null || !user.IsActive)
         {
-            logger.LogInformation("Reset lozinke tražen za nepostojeći/neaktivan nalog: {Email}", email);
+            logger.LogInformation("Reset lozinke tražen za nepostojeći/neaktivan nalog.");
             return;
         }
 
@@ -373,12 +378,12 @@ public sealed class AuthService(
         try
         {
             await emailService.SendPasswordResetEmailAsync(user.Email!, user.FullName, code);
-            logger.LogInformation("Kod za reset lozinke poslat na: {Email}", email);
+            logger.LogInformation("Kod za reset lozinke poslat korisniku {UserId}", user.Id);
         }
         catch (Exception ex)
         {
             // Kod je već upisan; korisnik može tražiti novi. Ne rušimo zahtev.
-            logger.LogError(ex, "Slanje koda za reset lozinke nije uspelo za: {Email}", email);
+            logger.LogError(ex, "Slanje koda za reset lozinke nije uspelo za korisnika {UserId}", user.Id);
         }
     }
 
@@ -456,7 +461,7 @@ public sealed class AuthService(
         if (emailUpravoPotvrdjen)
             await referralService.TryRewardSignupAsync(user.Id);
 
-        logger.LogInformation("Lozinka resetovana za: {Email}", email);
+        logger.LogInformation("Lozinka resetovana za korisnika {UserId}", user.Id);
         return (true, null);
     }
 

@@ -156,7 +156,7 @@ public sealed class ChatHub(
         }
 
         // Enkriptuj pre snimanja u bazu
-        var encrypted = encryption.Encrypt(text.Trim());
+        var encrypted = encryption.Encrypt(text.Trim(), conversationId);
 
         var message = new Message
         {

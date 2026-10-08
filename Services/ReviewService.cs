@@ -139,7 +139,7 @@ public sealed class ReviewService(
             listing.ProviderProfile.UserId,
             NotificationKind.NewReview,
             "Nova recenzija",
-            $"{author.FullName} je ostavio/la {dto.Stars}★ na \"{listing.Title}\".",
+            $"{author.FullName} ocenjuje „{listing.Title}“ sa {dto.Stars}★.",
             listing.Id);
 
         logger.LogInformation(
