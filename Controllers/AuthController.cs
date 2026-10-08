@@ -201,6 +201,18 @@ public sealed class AuthController(
     }
 
     // ── HTML helper ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Dugme „Otvori aplikaciju" — Android intent URL za usluzionica://verified.
+    ///
+    /// Intent, a ne goli usluzionica:// link: Chrome i ugrađeni pregledač
+    /// Gmail-a tada sami otvore Play prodavnicu ako aplikacija nije instalirana,
+    /// umesto da tap ne uradi ništa. Paket mora odgovarati ApplicationId-u
+    /// aplikacije, a host intent filteru u MainActivity.
+    /// </summary>
+    private const string OtvoriAplikaciju =
+        "intent://verified#Intent;scheme=usluzionica;package=rs.usluzionica.app;end";
+
     private static ContentResult HtmlPage(bool success, string title, string message)
     {
         var color = success ? "#22C55E" : "#EF4444";
@@ -248,6 +260,18 @@ public sealed class AuthController(
                   font-weight: 600;
                   letter-spacing: 0.03em;
                 }
+                .open {
+                  display: none;
+                  margin-top: 28px;
+                  padding: 14px 28px;
+                  border-radius: 14px;
+                  background: #2F6BFF;
+                  color: #fff;
+                  font-size: 15px;
+                  font-weight: 600;
+                  text-decoration: none;
+                }
+                .android .open { display: inline-block; }
               </style>
             </head>
             <body>
@@ -255,8 +279,13 @@ public sealed class AuthController(
                 <div class="icon">{{icon}}</div>
                 <h1>{{title}}</h1>
                 <p>{{message}}</p>
+                <a class="open" href="{{OtvoriAplikaciju}}">Otvori aplikaciju</a>
                 <div class="brand">USLUŽIONICA</div>
               </div>
+              <script>
+                // Dugme samo na Androidu — na računaru i iPhone-u intent link ne radi ništa.
+                if (/Android/i.test(navigator.userAgent)) document.body.classList.add('android');
+              </script>
             </body>
             </html>
             """;
