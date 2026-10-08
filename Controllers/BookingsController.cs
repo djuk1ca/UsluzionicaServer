@@ -139,7 +139,7 @@ public sealed class BookingsController(BookingService bookingService) : Controll
     ///
     /// Uslovi:
     ///   - Booking mora biti Confirmed
-    ///   - Mora proći 3 dana od AcceptedAt
+    ///   - Mora proći Booking:ExecuteAfterDays dana od AcceptedAt (podrazumevano 7)
     ///
     /// Efekti:
     ///   - Kreira ServiceExecution

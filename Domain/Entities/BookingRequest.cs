@@ -17,7 +17,7 @@ public class BookingRequest
 
     /// <summary>
     /// Postavljeno kad provider potvrdi zahtev (Status → Confirmed).
-    /// Koristi se za 3-dnevno pravilo pri izvršavanju usluge.
+    /// Koristi se za pravilo čekanja (Booking:ExecuteAfterDays) pri izvršavanju usluge.
     /// </summary>
     public DateTime?     AcceptedAt     { get; set; }
 

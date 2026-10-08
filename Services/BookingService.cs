@@ -12,9 +12,11 @@ namespace UsluzionicaServer.Services;
 ///   Pending → Rejected
 ///   Pending → Cancelled (klijent otkazuje)
 ///
-/// 3-dnevno pravilo: provider može označiti uslugu kao izvršenu
-/// tek 3 dana nakon potvrde (AcceptedAt + ExecuteAfterDays &lt; UtcNow).
-/// Ovo sprečava prevremeno farmovanje tokena.
+/// Pravilo čekanja: provider može označiti uslugu kao izvršenu tek
+/// Booking:ExecuteAfterDays dana (podrazumevano 7) nakon potvrde
+/// (AcceptedAt + ExecuteAfterDays &lt; UtcNow). Ovo sprečava farmovanje tokena:
+/// dva naloga ne mogu za par minuta da „obave" uslugu i pokupe nagradu.
+/// Kad čekanje istekne, uslugodavac dobija obaveštenje (PodsetnikZaIzvrsenje).
 /// </summary>
 public sealed class BookingService(
     AppDbContext         db,
@@ -43,8 +45,8 @@ public sealed class BookingService(
     private decimal ProviderRewardTokens =>
         config.GetValue<decimal>("Booking:ProviderRewardTokens", 3m);
 
-    private int ExecuteAfterDays =>
-        config.GetValue<int>("Booking:ExecuteAfterDays", 3);
+    public int ExecuteAfterDays =>
+        config.GetValue<int>("Booking:ExecuteAfterDays", 7);
 
     // ── CREATE ─────────────────────────────────────────────────────────────
     /// <summary>
@@ -60,7 +62,7 @@ public sealed class BookingService(
 
         // Anti-farming: email mora biti verifikovan
         if (!client.EmailConfirmed)
-            return (null, "Email adresa mora biti verifikovana pre slanja booking zahteva.");
+            return (null, "Email adresa mora biti verifikovana pre slanja zahteva za uslugu.");
 
         // Listing mora biti aktivan i imati providera
         var listing = await db.Listings
@@ -75,7 +77,7 @@ public sealed class BookingService(
 
         // Korisnik ne može bookirati sopstveni listing
         if (providerUserId == clientId)
-            return (null, "Ne možete poslati booking zahtev za sopstveni listing.");
+            return (null, "Ne možete poslati zahtev za sopstveni oglas.");
 
         // Blokada zatvara i rezervaciju.
         //
@@ -95,7 +97,7 @@ public sealed class BookingService(
             (b.Status   == BookingStatus.Pending || b.Status == BookingStatus.Confirmed));
 
         if (existingActive)
-            return (null, "Već imate aktivan booking zahtev za ovaj listing.");
+            return (null, "Već imate aktivan zahtev za ovaj oglas.");
 
         var now = DateTime.UtcNow;
 
@@ -130,8 +132,8 @@ public sealed class BookingService(
         await notificationService.SendAsync(
             providerUserId,
             NotificationKind.BookingReceived,
-            "Novi booking zahtev",
-            $"{client.FullName} je poslao/la zahtev za \"{listing.Title}\"",
+            "Novi zahtev za uslugu",
+            $"{client.FullName} šalje zahtev za „{listing.Title}“.",
             booking.Id);
 
         logger.LogInformation(
@@ -205,8 +207,8 @@ public sealed class BookingService(
         await notificationService.SendAsync(
             booking.ClientId,
             NotificationKind.BookingConfirmed,
-            "Booking potvrđen!",
-            $"Vaš zahtev za \"{booking.Listing.Title}\" je potvrđen.",
+            "Zahtev je prihvaćen",
+            $"Vaš zahtev za „{booking.Listing.Title}“ je prihvaćen.",
             booking.Id);
 
         logger.LogInformation("Booking #{Id} potvrđen od providera {ProviderId}", bookingId, providerUserId);
@@ -237,8 +239,8 @@ public sealed class BookingService(
         await notificationService.SendAsync(
             booking.ClientId,
             NotificationKind.BookingRejected,
-            "Booking odbijen",
-            $"Vaš zahtev za \"{booking.Listing.Title}\" je odbijen.",
+            "Zahtev je odbijen",
+            $"Vaš zahtev za „{booking.Listing.Title}“ je odbijen.",
             booking.Id);
 
         logger.LogInformation("Booking #{Id} odbijen od providera {ProviderId}", bookingId, providerUserId);
@@ -271,8 +273,8 @@ public sealed class BookingService(
         await notificationService.SendAsync(
             booking.ProviderUserId,
             NotificationKind.BookingCancelled,
-            "Booking otkazan",
-            $"Zahtev za \"{booking.Listing.Title}\" je otkazan od strane klijenta.",
+            "Zahtev je otkazan",
+            $"Klijent je otkazao zahtev za „{booking.Listing.Title}“.",
             booking.Id);
 
         logger.LogInformation("Booking #{Id} otkazan od klijenta {ClientId}", bookingId, clientId);
@@ -285,7 +287,7 @@ public sealed class BookingService(
     ///
     /// Uslovi:
     ///   1. Booking mora biti Confirmed
-    ///   2. Mora proći ExecuteAfterDays dana od AcceptedAt (default: 3)
+    ///   2. Mora proći ExecuteAfterDays dana od AcceptedAt (default: 7)
     ///
     /// Efekti:
     ///   - Kreira ServiceExecution zapis
@@ -393,7 +395,7 @@ public sealed class BookingService(
             booking.ClientId,
             NotificationKind.TokenEarned,
             "Usluga je izvršena — zaradili ste tokene",
-            $"Dobili ste {rewardAmount:0.##} tokena za uslugu \"{booking.Listing.Title}\". " +
+            $"Dobili ste {rewardAmount:0.##} tokena za uslugu „{booking.Listing.Title}“. " +
             "Ocenite uslugu da drugi znaju kako je prošlo.",
             booking.Id);
 
@@ -444,6 +446,10 @@ public sealed class BookingService(
         Id             = b.Id,
         ListingId      = b.ListingId,
         ListingTitle   = b.Listing?.Title     ?? string.Empty,
+        PriceMode      = b.Listing?.PriceMode.ToString() ?? string.Empty,
+        FixedPrice     = b.Listing?.FixedPrice,
+        PriceFrom      = b.Listing?.PriceFrom,
+        PriceTo        = b.Listing?.PriceTo,
         ClientId       = b.ClientId,
         ClientName     = b.Client?.FullName   ?? string.Empty,
         ClientImageUrl = b.Client?.ProfileImageUrl,
@@ -453,6 +459,8 @@ public sealed class BookingService(
         Status         = b.Status.ToString(),
         CreatedAt      = b.CreatedAt,
         AcceptedAt     = b.AcceptedAt,
+        ExecuteAfterDays = ExecuteAfterDays,
+        CanExecuteAt   = b.AcceptedAt?.AddDays(ExecuteAfterDays),
         CanExecute     = b.Status == BookingStatus.Confirmed
                       && b.AcceptedAt.HasValue
                       && (DateTime.UtcNow - b.AcceptedAt.Value).TotalDays >= ExecuteAfterDays
