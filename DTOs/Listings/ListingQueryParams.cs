@@ -17,6 +17,20 @@ public sealed class ListingQueryParams
     /// <summary>Filter po gradu (mora biti validna srpska opština).</summary>
     public string? City         { get; set; }
 
+    /// <summary>
+    /// true = samo istaknuti oglasi kojima boost nije istekao (sekcija
+    /// „Istaknuto" na početnoj). Ranije polje nije postojalo, pa je
+    /// `?isBoosted=true` tiho ignorisan i obe sekcije početne dobijale su isto.
+    /// </summary>
+    public bool? IsBoosted      { get; set; }
+
+    /// <summary>
+    /// „newest" = najnoviji prvi, bez prednosti istaknutih (sekcija „Novo").
+    /// Bilo šta drugo = podrazumevano: istaknuti prvi, pa najnoviji. Važi samo
+    /// bez tekstualnog upita — sa upitom redosled određuje relevantnost.
+    /// </summary>
+    public string? Sort         { get; set; }
+
     /// <summary>Stranica (1-based). Default: 1.</summary>
     public int Page             { get; set; } = 1;
 
