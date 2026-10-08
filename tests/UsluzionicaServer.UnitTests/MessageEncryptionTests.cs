@@ -198,6 +198,18 @@ public class MessageEncryptionTests
     }
 
     [Fact]
+    public void PrazanSlotZaKljuc_SePreskace()
+    {
+        // Compose unapred mapira Encryption__Keys__k1 iz .env-a; dok ENCRYPTION_KEY_K1
+        // ne postoji, vrednost je prazna — server mora normalno da krene na k0.
+        var sut = CreateSut(null,
+            ("Encryption:Keys:k1", ""),
+            ("Encryption:CurrentKeyId", ""));
+
+        sut.Encrypt("x", Razgovor).Should().StartWith("v2.k0.");
+    }
+
+    [Fact]
     public void Konstruktor_K0SeNeMozeZadatiRucno()
     {
         // k0 je izveden iz MessageKey; ručni k0 bi tiho promenio ključ kojim su

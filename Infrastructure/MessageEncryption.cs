@@ -69,6 +69,13 @@ public sealed class MessageEncryption
 
         foreach (var kljuc in config.GetSection("Encryption:Keys").GetChildren())
         {
+            // Prazan = slot nije u upotrebi. docker-compose.prod.yml unapred
+            // mapira `Encryption__Keys__k1: ${ENCRYPTION_KEY_K1:-}`, pa je
+            // rotacija samo dopuna .env-a — dok red u .env-u ne postoji,
+            // vrednost je prazna i ne sme da obori start.
+            if (string.IsNullOrWhiteSpace(kljuc.Value))
+                continue;
+
             if (kljuc.Key == IzvedeniId || !JeIspravanId(kljuc.Key))
                 throw new InvalidOperationException(
                     $"Encryption:Keys:{kljuc.Key} — id ključa mora biti oblika k1, k2… (k0 je rezervisan za izvedeni ključ).");
