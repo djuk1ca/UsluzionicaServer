@@ -49,7 +49,7 @@ public sealed class ProviderController(ProviderService providerService) : Contro
             return NotFound(new
             {
                 success = false,
-                message = "Provajder profil nije pronađen. Koristi POST /api/provider/activate."
+                message = "Profil uslugodavca nije pronađen. Koristi POST /api/provider/activate."
             });
 
         return Ok(new { success = true, data = profile });
@@ -72,7 +72,7 @@ public sealed class ProviderController(ProviderService providerService) : Contro
         if (!success)
             return BadRequest(new { success = false, message = error });
 
-        return Ok(new { success = true, message = "Provajder profil ažuriran." });
+        return Ok(new { success = true, message = "Profil uslugodavca ažuriran." });
     }
 
     // ── POST /api/provider/me/cover ───────────────────────────────────────
@@ -112,7 +112,7 @@ public sealed class ProviderController(ProviderService providerService) : Contro
         var profile  = await providerService.GetPublicProfileAsync(id, viewerId);
 
         if (profile is null)
-            return NotFound(new { success = false, message = "Provajder nije pronađen." });
+            return NotFound(new { success = false, message = "Uslugodavac nije pronađen." });
 
         return Ok(new { success = true, data = profile });
     }

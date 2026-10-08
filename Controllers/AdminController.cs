@@ -96,7 +96,7 @@ public sealed class AdminController(
     {
         var updated = await adminService.VerifyProviderAsync(id);
         if (!updated)
-            return NotFound(new { success = false, message = "Provajder profil nije pronađen." });
+            return NotFound(new { success = false, message = "Profil uslugodavca nije pronađen." });
 
         return Ok(new { success = true });
     }
