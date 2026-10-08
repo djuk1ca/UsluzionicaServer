@@ -57,6 +57,17 @@ public sealed class ConversationService(
         var onlineIds = await tracker.WhoIsOnlineAsync(
             conversations.Select(c => c.User1Id == userId ? c.User2Id : c.User1Id));
 
+        // Profili uslugodavaca sagovornika — jedan upit za celu listu, iz istog
+        // razloga kao online status iznad.
+        var sagovornici = conversations
+            .Select(c => c.User1Id == userId ? c.User2Id : c.User1Id)
+            .Distinct()
+            .ToList();
+        var profili = await db.ProviderProfiles.AsNoTracking()
+            .Where(p => sagovornici.Contains(p.UserId))
+            .Select(p => new { p.UserId, p.Id })
+            .ToDictionaryAsync(p => p.UserId, p => p.Id);
+
         var result = new List<ConversationDto>();
 
         foreach (var c in conversations)
@@ -89,6 +100,7 @@ public sealed class ConversationService(
                 OtherUserName     = other.FullName,
                 OtherUserImageUrl = other.ProfileImageUrl,
                 OtherUserIsOnline = onlineIds.Contains(other.Id),
+                OtherProviderProfileId = profili.TryGetValue(other.Id, out var profilId) ? profilId : null,
                 LastMessagePreview = preview,
                 LastMessageAt      = c.LastMessageAt,
                 UnreadCount        = unread,

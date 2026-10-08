@@ -16,6 +16,29 @@ namespace UsluzionicaServer.IntegrationTests.Services;
 /// </summary>
 public class MarketingZahteviTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
 {
+    // ── Razgovor → „Pošalji zahtev" ────────────────────────────────────────
+
+    [Fact]
+    public async Task ListaRazgovora_NosiProfilUslugodavca_SamoZaUslugodavca()
+    {
+        // Ekran razgovora po ovom polju povlači oglase sagovornika za dugme
+        // „Pošalji zahtev". Klijent sa druge strane ga NE sme dobiti — on nema
+        // oglase, i dugme bi vodilo na prazan spisak.
+        var (provajder, profilId) = await Data.CreateProviderAsync("cta-provajder@test.rs");
+        var klijent               = await Data.CreateConfirmedUserAsync("cta-klijent@test.rs");
+
+        await WithService<ConversationService, (DTOs.Conversations.ConversationDto?, string?)>(
+            svc => svc.GetOrCreateAsync(klijent.Id, provajder.Id));
+
+        var kodKlijenta = await WithService<ConversationService, List<DTOs.Conversations.ConversationDto>>(
+            svc => svc.GetConversationsAsync(klijent.Id));
+        var kodProvajdera = await WithService<ConversationService, List<DTOs.Conversations.ConversationDto>>(
+            svc => svc.GetConversationsAsync(provajder.Id));
+
+        kodKlijenta.Should().ContainSingle().Which.OtherProviderProfileId.Should().Be(profilId);
+        kodProvajdera.Should().ContainSingle().Which.OtherProviderProfileId.Should().BeNull();
+    }
+
     // ── P0-1 · Link pozivnice ──────────────────────────────────────────────
 
     [Fact]
@@ -78,7 +101,7 @@ public class MarketingZahteviTests(DatabaseFixture fixture) : IntegrationTestBas
             .Select(l => new { l.Description, l.Status })
             .ToListAsync());
 
-        oglasi.Should().HaveCount(8);
+        oglasi.Should().HaveCount(10, "8 uslugodavaca + 2 oglasa demo klijentkinje");
         oglasi.Should().OnlyContain(o => o.Description.Length >= 200,
             "potpun oglas ima opis od bar 200 znakova (Marketing 03 §9)");
 
@@ -118,5 +141,59 @@ public class MarketingZahteviTests(DatabaseFixture fixture) : IntegrationTestBas
         razgovori.Should().HaveCount(2);
         razgovori.Should().OnlyContain(r => !string.IsNullOrEmpty(r.LastMessagePreview)
                                          && r.LastMessagePreview!.Contains(' '));
+    }
+
+    [Fact]
+    public async Task DemoSeed_NovcanikDemoNalogaSeSlazeSaIstorijom()
+    {
+        // Play kadar 7 prikazuje i balans i istoriju — ako se razilaze, to se
+        // vidi na snimku. Balans mora biti zbir stavki, a BalanceAfter lanac.
+        await PokreniDemoAsync();
+
+        var demo = await Query(db => db.Users.SingleAsync(u => u.Email == DemoSeed.KlijentEmail));
+        var stavke = await Query(db => db.TokenTransactions
+            .Where(t => t.UserId == demo.Id)
+            .OrderBy(t => t.CreatedAt)
+            .ToListAsync());
+
+        stavke.Should().HaveCountGreaterThan(5);
+        stavke.Select(t => t.Kind).Distinct().Should().HaveCountGreaterThan(3, "raznovrsna istorija za snimak");
+        demo.TokenBalance.Should().Be(stavke.Sum(t => t.Amount)).And.BePositive();
+
+        var stanje = 0m;
+        foreach (var t in stavke)
+        {
+            stanje += t.Amount;
+            t.BalanceAfter.Should().Be(stanje);
+        }
+
+        // Svi korisnici: balans = zbir knjige (seed ne sme da „štampa" tokene).
+        var balansi = await Query(db => db.Users
+            .Where(u => u.Email!.EndsWith("@" + DemoSeed.Domen))
+            .Select(u => new
+            {
+                u.Email,
+                u.TokenBalance,
+                Knjiga = db.TokenTransactions.Where(t => t.UserId == u.Id).Sum(t => t.Amount)
+            })
+            .ToListAsync());
+        balansi.Should().OnlyContain(b => b.TokenBalance == b.Knjiga);
+    }
+
+    [Fact]
+    public async Task DemoSeed_DemoNalogImaSvojeOglaseINeOcenjujeSebe()
+    {
+        // Play kadar 6 („Moji oglasi") se snima sa istog naloga kao ostali.
+        await PokreniDemoAsync();
+
+        var demo = await Query(db => db.Users.SingleAsync(u => u.Email == DemoSeed.KlijentEmail));
+
+        var mojiOglasi = await Query(db => db.Listings
+            .Where(l => l.ProviderProfile.UserId == demo.Id)
+            .Select(l => l.Id).ToListAsync());
+        mojiOglasi.Should().HaveCount(2);
+
+        (await Query(db => db.Reviews.AnyAsync(r => mojiOglasi.Contains(r.ListingId) && r.AuthorId == demo.Id)))
+            .Should().BeFalse("niko ne ocenjuje sopstveni oglas");
     }
 }

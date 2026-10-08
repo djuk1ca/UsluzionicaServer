@@ -13,6 +13,14 @@ public sealed class ConversationDto
     public string?  OtherUserImageUrl { get; set; }
     public bool     OtherUserIsOnline { get; set; }
 
+    /// <summary>
+    /// Profil uslugodavca drugog korisnika, ili null ako nije uslugodavac.
+    /// Po njemu ekran razgovora povlači njegove oglase za dugme „Pošalji
+    /// zahtev" (GET /api/provider/{id}/listings) — razgovor sam ne pamti oglas.
+    /// Popunjava se samo u listi razgovora.
+    /// </summary>
+    public int?     OtherProviderProfileId { get; set; }
+
     // Poslednja poruka (tekst skraćen na 80 znakova, za preview)
     public string?  LastMessagePreview { get; set; }
     public DateTime? LastMessageAt     { get; set; }

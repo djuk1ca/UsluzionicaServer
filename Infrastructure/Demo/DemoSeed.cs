@@ -36,6 +36,11 @@ namespace UsluzionicaServer.Infrastructure.Demo;
 ///     izvršenu uslugu, jer drugačije aplikacija više ne prima
 ///   • fotografije samo iz foldera koji zadaš (<c>DemoSeed:ImagesPath</c>) —
 ///     tvoje ili licencirane; bez njih oglasi ostaju bez slika
+///   • tokeni samo kao posledica događaja iz seed-a (izvršene usluge,
+///     pozivnice, popust, boost), sa istim iznosima i opisima kao aplikacija
+///
+/// Demo nalog <see cref="KlijentEmail"/> je i klijent i uslugodavac (torte),
+/// da se svi Play kadrovi — i „Moji oglasi" i novčanik — snime bez odjave.
 /// </summary>
 public static class DemoSeed
 {
@@ -92,33 +97,24 @@ public static class DemoSeed
         foreach (var u in Uslugodavci)
         {
             var user = await NapraviKorisnikaAsync(users, db, u.Email, u.Ime, lozinka);
-
-            var (profil, greska) = await providers.ActivateAsync(user.Id, new ActivateProviderDto
-            {
-                Profession  = u.Zanimanje,
-                Bio         = u.Bio,
-                Location    = "Novi Sad",
-                CategoryIds = [u.KategorijaId]
-            });
-            if (profil is null)
-                throw new InvalidOperationException($"DemoSeed: aktivacija '{u.Ime}' nije uspela: {greska}");
-
-            var (oglas, greskaOglasa) = await listings.CreateAsync(user.Id, new CreateListingDto
-            {
-                Title       = u.Naslov,
-                Description = u.Opis,
-                Location    = "Novi Sad",
-                CategoryId  = u.KategorijaId,
-                PriceMode   = u.Cena.Mode,
-                FixedPrice  = u.Cena.Fiksna,
-                PriceFrom   = u.Cena.Od,
-                PriceTo     = u.Cena.Do
-            });
-            if (oglas is null)
-                throw new InvalidOperationException($"DemoSeed: oglas '{u.Naslov}' nije napravljen: {greskaOglasa}");
-
-            napravljeni.Add((u, user, oglas.Id));
+            await AktivirajAsync(providers, user, [u]);
+            napravljeni.Add((u, user, await NapraviOglasAsync(listings, user, u)));
         }
+
+        // Jovana je i uslugodavac — da se sa ISTOG naloga snimi i ekran klijenta
+        // i „Moji oglasi" (Play kadar 6), bez odjave usred snimanja.
+        await AktivirajAsync(providers, jovana, JovaniniOglasi);
+        foreach (var u in JovaniniOglasi)
+            napravljeni.Add((u, jovana, await NapraviOglasAsync(listings, jovana, u)));
+
+        // ── Knjiga tokena ──────────────────────────────────────────────────
+        // Tokeni nastaju SAMO kao posledica događaja koje seed pravi — izvršene
+        // usluge, pozivnice, popust, boost — po istim pravilima i istim opisima
+        // kao u aplikaciji. Balans se na kraju računa iz knjige, pa se novčanik
+        // i istorija uvek slažu (vidi ZapisiKnjiguAsync).
+        var knjiga            = new List<TokenTransaction>();
+        var nagradaKlijentu   = config.GetValue("Booking:ServiceRewardTokens",  5m);
+        var nagradaProvajderu = config.GetValue("Booking:ProviderRewardTokens", 3m);
 
         // ── Istaknuti oglasi (za boost na snimcima) ────────────────────────
         foreach (var (opis, _, listingId) in napravljeni.Where(n => n.Opis.BoostScore > 0))
@@ -134,10 +130,13 @@ public static class DemoSeed
 
         foreach (var (opis, provajder, listingId) in napravljeni)
         {
+            // Jovana ne ocenjuje sopstvene oglase.
+            var kandidati = klijenti.Where(k => k.Id != provajder.Id).ToArray();
+
             for (var i = 0; i < opis.Ocene.Length; i++)
             {
                 var (zvezdice, komentar) = opis.Ocene[i];
-                var klijent  = klijenti[(i + opis.Email.Length) % klijenti.Length];
+                var klijent  = kandidati[(i + opis.Email.Length) % kandidati.Length];
                 var kada     = sada.AddDays(-(6 + i * 9));
 
                 var booking = new BookingRequest
@@ -171,19 +170,31 @@ public static class DemoSeed
                     CreatedAt        = kada.AddHours(5)
                 });
                 await db.SaveChangesAsync();
-            }
 
-            var profil = await db.ProviderProfiles.FirstAsync(p => p.UserId == provajder.Id);
-            profil.AverageRating = Math.Round((decimal)opis.Ocene.Average(o => o.Zvezdice), 2);
-            profil.TotalReviews  = opis.Ocene.Length;
-            await db.SaveChangesAsync();
+                // Isto kao BookingService.MarkExecutedAsync: obe strane dobijaju tokene.
+                knjiga.Add(Transakcija(klijent.Id, nagradaKlijentu, TokenKind.ServiceReward,
+                    $"Nagrada za izvršenu uslugu: {opis.Naslov}", booking.Id, kada));
+                knjiga.Add(Transakcija(provajder.Id, nagradaProvajderu, TokenKind.ServiceReward,
+                    $"Nagrada za označenu izvršenu uslugu: {opis.Naslov}", booking.Id, kada));
+            }
         }
+
+        // Prosek po uslugodavcu, ne po oglasu — Jovana ima dva oglasa.
+        foreach (var grupa in napravljeni.GroupBy(n => n.User.Id))
+        {
+            var ocene  = grupa.SelectMany(n => n.Opis.Ocene).ToList();
+            var profil = await db.ProviderProfiles.FirstAsync(p => p.UserId == grupa.Key);
+            profil.AverageRating = Math.Round((decimal)ocene.Average(o => o.Zvezdice), 2);
+            profil.TotalReviews  = ocene.Count;
+        }
+        await db.SaveChangesAsync();
 
         // ── Razgovori ──────────────────────────────────────────────────────
         var marko  = napravljeni.First(n => n.Opis.Email.StartsWith("marko")).User;
         var jelena = napravljeni.First(n => n.Opis.Email.StartsWith("jelena")).User;
+        var milica = napravljeni.First(n => n.Opis.Email.StartsWith("milica")).User;
 
-        await NapraviRazgovorAsync(db, encryption, jovana, marko, sada.AddHours(-3),
+        var razgovorSaMarkom = await NapraviRazgovorAsync(db, encryption, jovana, marko, sada.AddHours(-3),
         [
             (true,  "Dobar dan, curi voda ispod sudopere. Da li ste slobodni sutra posle 16h?"),
             (false, "Dobar dan! Mogu sutra u 17h. Najverovatnije je sifon, imam rezervne kod sebe."),
@@ -198,16 +209,179 @@ public static class DemoSeed
             (true,  "Može, hvala!")
         ]);
 
+        // ── Token popust: Jovana → Marko, u njihovom razgovoru ─────────────
+        var markovOglas = napravljeni.First(n => n.User.Id == marko.Id);
+        var popust = new DiscountTokenOffer
+        {
+            SenderId       = jovana.Id,
+            ReceiverId     = marko.Id,
+            ListingId      = markovOglas.ListingId,
+            ConversationId = razgovorSaMarkom,
+            TokenAmount    = 5m,
+            Status         = DiscountOfferStatus.Accepted,
+            CreatedAt      = sada.AddHours(-2),
+            RespondedAt    = sada.AddHours(-1)
+        };
+        db.DiscountTokenOffers.Add(popust);
+        await db.SaveChangesAsync();
+
+        // Isti opisi kao TokenWalletService.AcceptOfferAsync.
+        knjiga.Add(Transakcija(jovana.Id, -popust.TokenAmount, TokenKind.DiscountSent,
+            $"Token popust poslan za \"{markovOglas.Opis.Naslov}\"", popust.Id, popust.RespondedAt.Value));
+        knjiga.Add(Transakcija(marko.Id, popust.TokenAmount, TokenKind.DiscountReceived,
+            $"Primljeni token popust za \"{markovOglas.Opis.Naslov}\"", popust.Id, popust.RespondedAt.Value));
+
+        // ── Pozivnice: Jovana je pozvala Tamaru i Milicu ───────────────────
+        // Pravi se POSLE aktivacije uslugodavaca: inače bi ProviderService pri
+        // Milicinoj aktivaciji sam isplatio drugu ratu, pa bi bila dva puta.
+        var nagradaPrijava    = config.GetValue("Referral:SignupRewardTokens",             2m);
+        var nagradaAktivacija = config.GetValue("Referral:ProviderActivationRewardTokens", 3m);
+
+        var pozivTamari = new Referral
+        {
+            ReferrerId          = jovana.Id,
+            ReferredUserId      = tamara.Id,
+            ReferralCode        = jovana.ReferralCode!,
+            Status              = ReferralStatus.Registered,
+            CreatedAt           = sada.AddDays(-41),
+            SignupTokensAwarded = nagradaPrijava,
+            SignupRewardedAt    = sada.AddDays(-40)
+        };
+        var pozivMilici = new Referral
+        {
+            ReferrerId              = jovana.Id,
+            ReferredUserId          = milica.Id,
+            ReferralCode            = jovana.ReferralCode!,
+            Status                  = ReferralStatus.Rewarded,
+            CreatedAt               = sada.AddDays(-46),
+            SignupTokensAwarded     = nagradaPrijava,
+            SignupRewardedAt        = sada.AddDays(-45),
+            ActivationTokensAwarded = nagradaAktivacija,
+            ActivationRewardedAt    = sada.AddDays(-44)
+        };
+        db.Referrals.AddRange(pozivTamari, pozivMilici);
+        await db.SaveChangesAsync();
+
+        // Isti opisi kao ReferralService.
+        knjiga.Add(Transakcija(jovana.Id, nagradaPrijava, TokenKind.Referral,
+            "Referral nagrada — pozvanik je potvrdio email", pozivMilici.Id, pozivMilici.SignupRewardedAt.Value));
+        knjiga.Add(Transakcija(jovana.Id, nagradaAktivacija, TokenKind.Referral,
+            "Referral nagrada — pozvanik je aktivirao provajder nalog", pozivMilici.Id, pozivMilici.ActivationRewardedAt.Value));
+        knjiga.Add(Transakcija(jovana.Id, nagradaPrijava, TokenKind.Referral,
+            "Referral nagrada — pozvanik je potvrdio email", pozivTamari.Id, pozivTamari.SignupRewardedAt.Value));
+
+        // ── Boost Jovaninih torti, plaćen tokenima ─────────────────────────
+        // Kao BoostService: tokeni / dani = BoostScore, uz zapis u ListingBoosts.
+        var torte       = napravljeni.First(n => n.Opis.KljucSlike == "torte");
+        var boostOd     = sada.AddDays(-2);
+        const int dana  = 7;
+        const decimal potroseno = 14m;
+        var boostDelta  = Math.Round(potroseno / dana, 4);
+
+        await db.Listings.Where(l => l.Id == torte.ListingId).ExecuteUpdateAsync(s => s
+            .SetProperty(l => l.IsBoosted,      true)
+            .SetProperty(l => l.BoostScore,     boostDelta)
+            .SetProperty(l => l.BoostExpiresAt, boostOd.AddDays(dana)));
+
+        db.ListingBoosts.Add(new ListingBoost
+        {
+            ListingId    = torte.ListingId,
+            UserId       = jovana.Id,
+            TokensSpent  = potroseno,
+            DurationDays = dana,
+            StartsAt     = boostOd,
+            ExpiresAt    = boostOd.AddDays(dana),
+            IsActive     = true
+        });
+        knjiga.Add(Transakcija(jovana.Id, -potroseno, TokenKind.BoostSpend,
+            $"Boost \"{torte.Opis.Naslov}\" — {dana} dana (+{boostDelta:0.####} BoostScore)", torte.ListingId, boostOd));
+
+        await ZapisiKnjiguAsync(db, knjiga);
+
         // ── Slike (opciono) ────────────────────────────────────────────────
         await DodajSlikeAsync(config, listings, napravljeni, logger);
 
+        var jovaninBalans = await db.Users.Where(u => u.Id == jovana.Id).Select(u => u.TokenBalance).FirstAsync();
         logger.LogWarning(
-            "DemoSeed: napravljeno {Uslugodavaca} uslugodavaca i {Klijenata} klijenata na domenu {Domen}. " +
-            "Prijava za snimke: {Email}",
-            napravljeni.Count, klijenti.Length, Domen, KlijentEmail);
+            "DemoSeed: napravljeno {Oglasa} oglasa i {Klijenata} klijenata na domenu {Domen}, " +
+            "{Transakcija} token transakcija. Prijava za snimke: {Email} (balans {Balans} tokena, i klijent i uslugodavac)",
+            napravljeni.Count, klijenti.Length, Domen, knjiga.Count, KlijentEmail, jovaninBalans);
     }
 
     // ── Pomoćno ────────────────────────────────────────────────────────────
+
+    private static async Task AktivirajAsync(
+        ProviderService providers, ApplicationUser user, Uslugodavac[] oglasi)
+    {
+        var (profil, greska) = await providers.ActivateAsync(user.Id, new ActivateProviderDto
+        {
+            Profession  = oglasi[0].Zanimanje,
+            Bio         = oglasi[0].Bio,
+            Location    = "Novi Sad",
+            CategoryIds = [.. oglasi.Select(o => o.KategorijaId).Distinct()]
+        });
+        if (profil is null)
+            throw new InvalidOperationException($"DemoSeed: aktivacija '{oglasi[0].Ime}' nije uspela: {greska}");
+    }
+
+    private static async Task<int> NapraviOglasAsync(
+        ListingService listings, ApplicationUser user, Uslugodavac u)
+    {
+        var (oglas, greska) = await listings.CreateAsync(user.Id, new CreateListingDto
+        {
+            Title       = u.Naslov,
+            Description = u.Opis,
+            Location    = "Novi Sad",
+            CategoryId  = u.KategorijaId,
+            PriceMode   = u.Cena.Mode,
+            FixedPrice  = u.Cena.Fiksna,
+            PriceFrom   = u.Cena.Od,
+            PriceTo     = u.Cena.Do
+        });
+        if (oglas is null)
+            throw new InvalidOperationException($"DemoSeed: oglas '{u.Naslov}' nije napravljen: {greska}");
+
+        return oglas.Id;
+    }
+
+    private static TokenTransaction Transakcija(
+        string userId, decimal iznos, TokenKind vrsta, string opis, int? referenca, DateTime kada) => new()
+    {
+        UserId      = userId,
+        Amount      = iznos,
+        Kind        = vrsta,
+        Description = opis,
+        ReferenceId = referenca,
+        CreatedAt   = kada
+    };
+
+    /// <summary>
+    /// Upisuje knjigu i iz nje računa balanse: hronološki po korisniku,
+    /// BalanceAfter je stanje posle svake stavke, a TokenBalance poslednje
+    /// stanje. Tako novčanik i istorija ne mogu da se raziđu.
+    /// </summary>
+    private static async Task ZapisiKnjiguAsync(AppDbContext db, List<TokenTransaction> knjiga)
+    {
+        foreach (var grupa in knjiga.GroupBy(t => t.UserId))
+        {
+            var stanje = 0m;
+            foreach (var t in grupa.OrderBy(t => t.CreatedAt))
+            {
+                stanje += t.Amount;
+                if (stanje < 0)
+                    throw new InvalidOperationException(
+                        $"DemoSeed: balans korisnika {grupa.Key} pada ispod nule kod „{t.Description}\" — " +
+                        "aplikacija to ne bi dozvolila, popravi redosled ili iznose u seed-u.");
+                t.BalanceAfter = stanje;
+            }
+
+            var user = await db.Users.FirstAsync(u => u.Id == grupa.Key);
+            user.TokenBalance = stanje;
+        }
+
+        db.TokenTransactions.AddRange(knjiga);
+        await db.SaveChangesAsync();
+    }
 
     private static async Task<ApplicationUser> NapraviKorisnikaAsync(
         UserManager<ApplicationUser> users, AppDbContext db, string email, string ime, string lozinka)
@@ -239,7 +413,7 @@ public static class DemoSeed
         return user;
     }
 
-    private static async Task NapraviRazgovorAsync(
+    private static async Task<int> NapraviRazgovorAsync(
         AppDbContext db, MessageEncryption encryption,
         ApplicationUser klijent, ApplicationUser provajder, DateTime pocetak,
         (bool OdKlijenta, string Tekst)[] poruke)
@@ -269,6 +443,7 @@ public static class DemoSeed
 
         razgovor.LastMessageAt = vreme;
         await db.SaveChangesAsync();
+        return razgovor.Id;
     }
 
     /// <summary>
@@ -430,5 +605,37 @@ public static class DemoSeed
             [(5, "Posle tri meseca konverzacije mnogo sigurnije pričam na poslu."),
              (5, "Odlična priprema za IELTS, dobila sam ocenu koja mi je trebala."),
              (4, "Zanimljivi časovi, puno praktičnih primera.")])
+    ];
+
+    /// <summary>
+    /// Oglasi demo klijentkinje Jovane — ista osoba je i uslugodavac, kao što
+    /// aplikacija i dozvoljava. Zanimanje i bio uzimaju se iz prvog oglasa.
+    /// BoostScore je 0 jer se boost torti pravi posebno, plaćen tokenima.
+    /// </summary>
+    private static readonly Uslugodavac[] JovaniniOglasi =
+    [
+        new(KlijentEmail, "Jovana Petrović", "Poslastičarka",
+            "Torte i kolači po porudžbini iz moje kuhinje na Limanu. Domaći sastojci, bez gotovih smesa.",
+            104,
+            "Torte po porudžbini — rođendani i slavlja, Liman",
+            "Šta pravim: rođendanske i dečje torte, torte za slave, krštenja i venčanja, voćne i čokoladne. " +
+            "Gde: preuzimanje na Limanu, dostava po Novom Sadu po dogovoru. Kada: porudžbine najkasnije " +
+            "pet dana unapred, za venčanja dve nedelje. Cena: od 3.500 din za tortu od 1,5 kg, tačna cena " +
+            "zavisi od veličine i ukrasa. Pošalji fotografiju ili ideju u poruci.",
+            new(PriceMode.Range, Od: 3500, Do: 9000), "torte", 0m,
+            [(5, "Torta za ćerkin rođendan je bila i lepa i ukusna, deca su oduševljena."),
+             (5, "Švarcvald kao kod bake, stigla tačno u dogovoreno vreme.")]),
+
+        new(KlijentEmail, "Jovana Petrović", "Poslastičarka",
+            "Torte i kolači po porudžbini iz moje kuhinje na Limanu. Domaći sastojci, bez gotovih smesa.",
+            187,
+            "Dekoracija torti — figurice, cveće i natpisi po želji",
+            "Šta radim: dekoracija torti fondanom i šlagom, šećerno cveće, figurice, natpisi i jestive " +
+            "slike, tematske torte za dečje rođendane. Gde: Liman, preuzimanje ili dostava po dogovoru. " +
+            "Kada: najkasnije nedelju dana unapred. Cena: dekoracija od 1.500 din, figurice po komadu. " +
+            "Mogu da ukrasim i tortu koju ste sami ispekli.",
+            new(PriceMode.Range, Od: 1500, Do: 5000), "dekoracija", 0m,
+            [(5, "Figurice za tematski rođendan baš kao na slici koju sam poslala."),
+             (4, "Lepo urađeno cveće na torti za krštenje, malo duže čekanje.")])
     ];
 }
