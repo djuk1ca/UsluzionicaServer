@@ -20,6 +20,8 @@ public static class AcquisitionSources
         "facebook",
         "youtube",
         "linkedin",
+        "viber",          // Viber grupa ili zajednica (Marketing 04, 08 §4)
+        "reddit",
         "prijatelj",      // Prijatelj ili poznanik
         "uslugodavac",    // Uslugodavac me pozvao
         "plakat",         // Plakat ili flajer

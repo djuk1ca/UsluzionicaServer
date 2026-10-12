@@ -31,6 +31,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<Report>              Reports              => Set<Report>();
     public DbSet<UserBlock>           UserBlocks           => Set<UserBlock>();
     public DbSet<DeviceToken>         DeviceTokens         => Set<DeviceToken>();
+    public DbSet<WaitlistBonus>       WaitlistBonuses      => Set<WaitlistBonus>();
 
     // ── Održavanje indeksa za pretragu ─────────────────────────────────────
     // Presreće SVAKI upis i osvežava Search* kolone pre nego što odu u bazu.
@@ -778,6 +779,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
              .WithMany()
              .HasForeignKey(d => d.UserId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── WaitlistBonus ──────────────────────────────────────────────────
+        // Bez veze ka AspNetUsers — vidi obrazloženje uz entitet.
+        builder.Entity<WaitlistBonus>(e =>
+        {
+            e.Property(w => w.EmailHash).HasMaxLength(64).IsRequired();
+            e.Property(w => w.UserId).HasMaxLength(450).IsRequired();
+            e.Property(w => w.Amount).HasColumnType("decimal(18,2)");
+
+            e.HasIndex(w => w.EmailHash).IsUnique();
+            e.HasIndex(w => w.UserId).IsUnique();
         });
     }
 }

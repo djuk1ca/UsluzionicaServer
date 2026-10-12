@@ -8,5 +8,8 @@ public enum TokenKind
     DiscountSent,
     DiscountReceived,
     Referral,
-    AdminGrant
+    AdminGrant,
+
+    /// <summary>10 tokena za upis na listu čekanja pre izlaska (WaitlistBonus).</summary>
+    WaitlistBonus
 }

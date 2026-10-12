@@ -12,6 +12,7 @@ namespace UsluzionicaServer.Controllers;
 public sealed class AuthController(
     AuthService                  authService,
     ReferralService              referralService,
+    ListaCekanjaBonus            listaCekanja,
     UserManager<ApplicationUser> userManager) : ControllerBase
 {
     // ── POST /api/auth/register ────────────────────────────────────────────
@@ -98,6 +99,9 @@ public sealed class AuthController(
         // Metoda je idempotentna: ovaj link se lako aktivira dvaput (mail
         // klijent ga prefetch-uje, pa korisnik klikne), a nagrada sme jednom.
         await referralService.TryRewardSignupAsync(user.Id);
+
+        // Bonus sa liste čekanja traži potvrđenu adresu — isti trenutak.
+        await listaCekanja.PokusajAsync(user.Id);
 
         return HtmlPage(
             success: true,
