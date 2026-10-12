@@ -14,39 +14,47 @@ namespace UsluzionicaServer.Infrastructure;
 /// ručnog koraka i nema druge kopije liste: prijava koja stigne na sajt danas
 /// važi za bonus čim je fajl na disku.
 ///
-/// Iz reda se čitaju samo `kontakt` i `kreirano`. Sve ostalo (sekcija sajta,
-/// kanal, heš IP-ja) API-ju ne treba.
+/// Iz reda se čitaju `kontakt`, `kreirano`, `platforma` (uređaj sa kog je
+/// prijava poslata) i, ako postoji, `lista`. Ostalo (sekcija sajta, kanal, heš
+/// IP-ja) API-ju ne treba. Kojoj listi prijava pripada (Android ili iPhone)
+/// odlučuje <see cref="Services.ListaCekanjaBonus"/>, ne čitač.
 ///
 /// Fajl se parsira ponovo samo kad mu se promeni veličina ili vreme izmene —
 /// sajt samo dopisuje, pa je to pouzdan znak da je stiglo nešto novo.
 /// </summary>
 public sealed class ListaCekanja(IConfiguration config, ILogger<ListaCekanja> logger)
 {
+    /// <summary>Jedna adresa sa liste.</summary>
+    /// <param name="Kreirano">Najraniji upis (UTC).</param>
+    /// <param name="Platforma">„android", „ios", „desktop" ili null (stari redovi).</param>
+    /// <param name="Lista">Izričita lista ako je sajt upiše („android"/„ios"), inače null.</param>
+    public sealed record Prijava(DateTime Kreirano, string? Platforma, string? Lista);
+
+    private static readonly IReadOnlyDictionary<string, Prijava> Prazno = new Dictionary<string, Prijava>();
+
     private readonly object _brava = new();
     private (DateTime Izmenjen, long Velicina) _verzija;
-    private IReadOnlyDictionary<string, DateTime> _prijave = new Dictionary<string, DateTime>();
+    private IReadOnlyDictionary<string, Prijava> _prijave = Prazno;
 
     /// <summary>Putanja do prijave.jsonl, ili null kad bonus nije uključen.</summary>
     public string? Putanja => config["Waitlist:Path"] is { Length: > 0 } p ? p : null;
 
-    /// <summary>
-    /// Adresa (mala slova) → najranije vreme upisa (UTC). Prazno ako fajla nema.
-    /// </summary>
-    public IReadOnlyDictionary<string, DateTime> Prijave()
+    /// <summary>Adresa (mala slova) → prijava. Prazno ako fajla nema.</summary>
+    public IReadOnlyDictionary<string, Prijava> Prijave()
     {
         var putanja = Putanja;
-        if (putanja is null) return new Dictionary<string, DateTime>();
+        if (putanja is null) return Prazno;
 
         FileInfo info;
         try
         {
             info = new FileInfo(putanja);
-            if (!info.Exists) return new Dictionary<string, DateTime>();
+            if (!info.Exists) return Prazno;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Lista čekanja nije dostupna.");
-            return new Dictionary<string, DateTime>();
+            return Prazno;
         }
 
         var verzija = (info.LastWriteTimeUtc, info.Length);
@@ -65,11 +73,11 @@ public sealed class ListaCekanja(IConfiguration config, ILogger<ListaCekanja> lo
         }
     }
 
-    /// <summary>Vreme upisa za adresu, ili null ako je nema na listi.</summary>
-    public DateTime? Nadji(string? email)
+    /// <summary>Prijava za adresu, ili null ako je nema na listi.</summary>
+    public Prijava? Nadji(string? email)
     {
         var kljuc = Normalizuj(email);
-        return kljuc is not null && Prijave().TryGetValue(kljuc, out var kada) ? kada : null;
+        return kljuc is not null && Prijave().TryGetValue(kljuc, out var p) ? p : null;
     }
 
     public static string? Normalizuj(string? email) =>
@@ -79,9 +87,9 @@ public sealed class ListaCekanja(IConfiguration config, ILogger<ListaCekanja> lo
     public static string Hes(string email) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Normalizuj(email) ?? ""))).ToLowerInvariant();
 
-    private Dictionary<string, DateTime> Ucitaj(string putanja)
+    private Dictionary<string, Prijava> Ucitaj(string putanja)
     {
-        var rezultat = new Dictionary<string, DateTime>(StringComparer.Ordinal);
+        var rezultat = new Dictionary<string, Prijava>(StringComparer.Ordinal);
         var losih = 0;
 
         // FileShare.ReadWrite: sajt može baš tada da dopisuje red. Poslednji
@@ -97,23 +105,25 @@ public sealed class ListaCekanja(IConfiguration config, ILogger<ListaCekanja> lo
                 using var doc = JsonDocument.Parse(red);
                 var koren = doc.RootElement;
 
-                var email = Normalizuj(koren.TryGetProperty("kontakt", out var k) ? k.GetString() : null);
+                var email = Normalizuj(Tekst(koren, "kontakt"));
                 if (email is null) { losih++; continue; }
 
-                if (!koren.TryGetProperty("kreirano", out var kr) ||
-                    !DateTimeOffset.TryParse(kr.GetString(), CultureInfo.InvariantCulture,
+                if (!DateTimeOffset.TryParse(Tekst(koren, "kreirano"), CultureInfo.InvariantCulture,
                                              DateTimeStyles.AssumeUniversal, out var kada))
                 {
                     losih++;
                     continue;
                 }
 
-                var utc = kada.UtcDateTime;
+                var prijava = new Prijava(
+                    kada.UtcDateTime,
+                    Tekst(koren, "platforma")?.Trim().ToLowerInvariant(),
+                    Tekst(koren, "lista")?.Trim().ToLowerInvariant());
 
                 // Sajt odbija duplikate, ali ako ih ipak ima, važi PRVI upis —
                 // on odlučuje da li je čovek bio na listi pre izlaska.
-                if (!rezultat.TryGetValue(email, out var postojeci) || utc < postojeci)
-                    rezultat[email] = utc;
+                if (!rezultat.TryGetValue(email, out var postojeca) || prijava.Kreirano < postojeca.Kreirano)
+                    rezultat[email] = prijava;
             }
             catch (JsonException)
             {
@@ -126,4 +136,7 @@ public sealed class ListaCekanja(IConfiguration config, ILogger<ListaCekanja> lo
 
         return rezultat;
     }
+
+    private static string? Tekst(JsonElement koren, string ime) =>
+        koren.TryGetProperty(ime, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }

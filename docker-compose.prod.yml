@@ -133,11 +133,14 @@ services:
       # istom adresom (Services/ListaCekanjaBonus.cs). Lista je fajl sajta,
       # montiran ispod samo za čitanje.
       #
-      # WAITLIST_LAUNCH_DATE se upisuje u .env NA DAN IZLASKA (npr. 2026-10-20).
-      # Od tada važe dva pravila sa sajta: bonus samo za upis pre tog dana i
-      # samo za nalog otvoren u roku od 60 dana. Dok je prazno, svi upisi važe.
+      # Dva izlaska, dve liste: posle izlaska za Android lista na sajtu ostaje
+      # za iPhone, sa istim bonusom i sopstvenim rokom. Datum se upisuje u
+      # .env NA DAN IZLASKA te platforme (npr. 2026-10-12). Od tada za tu
+      # listu važi: bonus samo za upis pre tog dana i samo za nalog otvoren u
+      # roku od 60 dana. Dok je prazno, svi upisi na tu listu važe.
       Waitlist__Path: /lista-cekanja/prijave.jsonl
-      Waitlist__LaunchDate: ${WAITLIST_LAUNCH_DATE:-}
+      Waitlist__AndroidLaunchDate: ${WAITLIST_ANDROID_LAUNCH_DATE:-}
+      Waitlist__IosLaunchDate: ${WAITLIST_IOS_LAUNCH_DATE:-}
 
     volumes:
       # Serilog file sink pise ovde — vidi Program.cs.

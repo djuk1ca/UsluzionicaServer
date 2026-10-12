@@ -24,7 +24,8 @@ public class ListaCekanjaBonusTests(DatabaseFixture fixture) : IntegrationTestBa
     // Factory postavlja Waitlist:BonusTokens = 7.
     private const decimal Bonus = 7m;
 
-    private static void Upisi(string putanja, string email, DateTimeOffset? kada = null)
+    private static void Upisi(string putanja, string email, DateTimeOffset? kada = null,
+                              string platforma = "android", string? lista = null)
     {
         // Isti oblik reda koji piše PrijavaServis na sajtu.
         var red = JsonSerializer.Serialize(new
@@ -32,6 +33,8 @@ public class ListaCekanjaBonusTests(DatabaseFixture fixture) : IntegrationTestBa
             kontakt  = email,
             tip      = "email",
             izvor    = "hero",
+            platforma,
+            lista,
             kreirano = (kada ?? DateTimeOffset.UtcNow.AddDays(-3)).ToString("O", CultureInfo.InvariantCulture)
         });
         File.AppendAllText(putanja, red + Environment.NewLine);
@@ -145,22 +148,85 @@ public class ListaCekanjaBonusTests(DatabaseFixture fixture) : IntegrationTestBa
 
     // ── Pravila sa sajta ───────────────────────────────────────────────────
 
+    private static string D(DateTimeOffset d) => d.ToString("O", CultureInfo.InvariantCulture);
+
     [Fact]
-    public async Task UpisPosleIzlaska_NemaBonusa()
+    public async Task UpisPosleIzlaskaZaAndroid_JeIphoneLista_VaziDokIphoneNeIzadje()
     {
+        // Posle izlaska za Android sajt nudi preuzimanje, a formu samo za
+        // iPhone — takav upis čeka iPhone i nosi isti bonus.
         var putanja = NovaLista();
-        var izlazak = DateTimeOffset.UtcNow.AddDays(-5);
-        Upisi(putanja, "kasno@test.rs", izlazak.AddDays(1));
-        var user = await Data.CreateConfirmedUserAsync("kasno@test.rs");
+        var android = DateTimeOffset.UtcNow.AddDays(-5);
+        Upisi(putanja, "za-iphone@test.rs", android.AddDays(1), platforma: "desktop");
+        var user = await Data.CreateConfirmedUserAsync("za-iphone@test.rs");
 
         var dobio = await SaKonfiguracijom(new()
         {
-            ["Waitlist:Path"]       = putanja,
-            ["Waitlist:LaunchDate"] = izlazak.ToString("O", CultureInfo.InvariantCulture)
+            ["Waitlist:Path"]              = putanja,
+            ["Waitlist:AndroidLaunchDate"] = D(android)
+        }, b => b.PokusajAsync(user.Id));
+
+        dobio.Should().BeTrue();
+        (await Balans(user.Id)).Should().Be(10m);   // podrazumevani iznos (ova konfiguracija ga ne menja)
+    }
+
+    [Fact]
+    public async Task UpisPosleIzlaskaZaIphone_NemaBonusa()
+    {
+        var putanja = NovaLista();
+        var android = DateTimeOffset.UtcNow.AddDays(-30);
+        var ios     = DateTimeOffset.UtcNow.AddDays(-5);
+        Upisi(putanja, "kasno-iphone@test.rs", ios.AddDays(1), platforma: "ios");
+        var user = await Data.CreateConfirmedUserAsync("kasno-iphone@test.rs");
+
+        var dobio = await SaKonfiguracijom(new()
+        {
+            ["Waitlist:Path"]              = putanja,
+            ["Waitlist:AndroidLaunchDate"] = D(android),
+            ["Waitlist:IosLaunchDate"]     = D(ios)
         }, b => b.PokusajAsync(user.Id));
 
         dobio.Should().BeFalse();
-        (await Balans(user.Id)).Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task IphonePrijavaPreAndroida_NeIsticeSaAndroidRokom()
+    {
+        // Upisao se sa iPhone-a pre izlaska za Android — Android verziju nije
+        // ni mogao da instalira. Android rok od 60 dana je prošao, ali njegov
+        // teče tek od izlaska za iPhone.
+        var putanja = NovaLista();
+        var android = DateTimeOffset.UtcNow.AddDays(-70);
+        Upisi(putanja, "rani-iphone@test.rs",  android.AddDays(-10), platforma: "ios");
+        Upisi(putanja, "rani-android@test.rs", android.AddDays(-10), platforma: "android");
+        var iphone  = await Data.CreateConfirmedUserAsync("rani-iphone@test.rs");
+        var androidKorisnik = await Data.CreateConfirmedUserAsync("rani-android@test.rs");
+
+        var konf = new Dictionary<string, string?>
+        {
+            ["Waitlist:Path"]              = putanja,
+            ["Waitlist:AndroidLaunchDate"] = D(android)
+        };
+
+        (await SaKonfiguracijom(konf, b => b.PokusajAsync(iphone.Id))).Should().BeTrue();
+        (await SaKonfiguracijom(konf, b => b.PokusajAsync(androidKorisnik.Id))).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IzricitaListaSaSajta_ImaPrednost()
+    {
+        // Sajt posle izlaska za Android upisuje `lista: "ios"`. Čak i ako bi
+        // datum i uređaj rekli drugo, važi ono što je sajt upisao.
+        var putanja = NovaLista();
+        var android = DateTimeOffset.UtcNow.AddDays(-70);
+        Upisi(putanja, "izricito@test.rs", android.AddDays(-10), platforma: "android", lista: "ios");
+        var user = await Data.CreateConfirmedUserAsync("izricito@test.rs");
+
+        (await SaKonfiguracijom(new()
+        {
+            ["Waitlist:Path"]              = putanja,
+            ["Waitlist:AndroidLaunchDate"] = D(android)
+        }, b => b.PokusajAsync(user.Id))).Should().BeTrue();
     }
 
     [Fact]
@@ -175,8 +241,8 @@ public class ListaCekanjaBonusTests(DatabaseFixture fixture) : IntegrationTestBa
 
         var konf = new Dictionary<string, string?>
         {
-            ["Waitlist:Path"]       = putanja,
-            ["Waitlist:LaunchDate"] = izlazak.ToString("O", CultureInfo.InvariantCulture)
+            ["Waitlist:Path"]              = putanja,
+            ["Waitlist:AndroidLaunchDate"] = D(izlazak)
         };
 
         // Rok od 60 dana je istekao juče.

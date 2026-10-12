@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
@@ -11,14 +12,21 @@ namespace UsluzionicaServer.Services;
 /// aplikacije i otvori nalog ISTOM adresom.
 ///
 /// To je obećanje sa sajta (usluzionica.rs — modal, poziv na dnu, „Česta
-/// pitanja"), pa pravila ovde moraju da prate tamošnji tekst:
+/// pitanja"), pa pravila ovde moraju da prate tamošnji tekst.
 ///
-///   • važi samo za upis PRE izlaska      → Waitlist:LaunchDate
-///   • nalog mora biti otvoren u roku     → Waitlist:ClaimDays posle izlaska (60)
-///   • „istom adresom"                    → adresa naloga = adresa sa liste
+/// DVE LISTE, DVA IZLASKA. Aplikacija izlazi posebno za Android i za iPhone.
+/// Posle izlaska za Android sajt nudi preuzimanje, a lista čekanja ostaje za
+/// iPhone — sa istim bonusom i sopstvenim rokom. Svaka prijava zato pripada
+/// jednoj listi (<see cref="ListaZa"/>), a za svaku listu važi:
 ///
-/// Dok LaunchDate nije postavljen, aplikacija još nije izašla: svaki upis je
-/// „pre izlaska" i rok još ne teče.
+///   • upis PRE izlaska te platforme          → Waitlist:AndroidLaunchDate / IosLaunchDate
+///   • nalog otvoren u roku posle izlaska     → Waitlist:ClaimDays (60)
+///   • „istom adresom"                        → adresa naloga = adresa sa liste
+///
+/// Dok datum izlaska nije upisan, ta platforma još nije izašla: svaki upis na
+/// njenu listu važi i rok još ne teče.
+///
+/// Bonus je jedan po nalogu, ne po platformi — isti nalog radi na oba telefona.
 ///
 /// SAMO POTVRĐENA ADRESA. Bez toga bi bilo ko mogao da otvori nalog sa tuđom
 /// adresom sa liste i uzme njene tokene. Zato se bonus proverava na istim
@@ -36,19 +44,53 @@ public sealed class ListaCekanjaBonus(
     IConfiguration             config,
     ILogger<ListaCekanjaBonus> logger)
 {
-    public decimal Iznos => config.GetValue("Waitlist:BonusTokens", 10m);
+    public const string Android = "android";
+    public const string Ios     = "ios";
 
-    public DateTime? DatumIzlaska =>
-        DateTime.TryParse(config["Waitlist:LaunchDate"], System.Globalization.CultureInfo.InvariantCulture,
-                          System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal,
-                          out var d) ? d : null;
+    public decimal Iznos => config.GetValue("Waitlist:BonusTokens", 10m);
 
     public int RokDana => config.GetValue("Waitlist:ClaimDays", 60);
 
-    /// <summary>Poslednji trenutak u kom se bonus još dodeljuje, ili null dok aplikacija nije izašla.</summary>
-    public DateTime? Rok => DatumIzlaska?.AddDays(RokDana);
+    public DateTime? IzlazakAndroid => Datum("Waitlist:AndroidLaunchDate");
+    public DateTime? IzlazakIos     => Datum("Waitlist:IosLaunchDate");
+
+    public DateTime? Izlazak(string listaPrijave) => listaPrijave == Ios ? IzlazakIos : IzlazakAndroid;
+
+    /// <summary>Poslednji dan za bonus sa te liste, ili null dok platforma nije izašla.</summary>
+    public DateTime? Rok(string listaPrijave) => Izlazak(listaPrijave)?.AddDays(RokDana);
 
     private bool Ukljucen => lista.Putanja is not null && Iznos > 0;
+
+    private DateTime? Datum(string kljuc) =>
+        DateTime.TryParse(config[kljuc], CultureInfo.InvariantCulture,
+                          DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+                          out var d) ? d : null;
+
+    /// <summary>
+    /// Kojoj listi prijava pripada:
+    ///   1. sajt je izričito upisao listu → ta lista;
+    ///   2. upis POSLE izlaska za Android → iPhone (sajt tada nudi Android
+    ///      preuzimanje, a formu samo za iPhone);
+    ///   3. upis sa iPhone-a pre izlaska za Android → iPhone (taj čovek
+    ///      Android verziju nije ni mogao da instalira);
+    ///   4. sve ostalo → Android.
+    /// </summary>
+    public string ListaZa(ListaCekanja.Prijava p)
+    {
+        if (p.Lista is Android or Ios) return p.Lista;
+        if (IzlazakAndroid is { } android && p.Kreirano > android) return Ios;
+        if (p.Platforma == Ios) return Ios;
+        return Android;
+    }
+
+    /// <summary>Da li prijava SADA donosi bonus po pravilima svoje liste.</summary>
+    private bool Vazi(ListaCekanja.Prijava p, DateTime sada)
+    {
+        var l = ListaZa(p);
+        if (Izlazak(l) is { } izlazak && p.Kreirano > izlazak) return false;   // upis posle izlaska
+        if (Rok(l) is { } rok && sada > rok) return false;                       // rok za nalog istekao
+        return true;
+    }
 
     /// <summary>
     /// Dodeljuje bonus korisniku ako mu je potvrđena adresa na listi i ako ga
@@ -60,9 +102,6 @@ public sealed class ListaCekanjaBonus(
         {
             if (!Ukljucen) return false;
 
-            var sada = DateTime.UtcNow;
-            if (Rok is { } rok && sada > rok) return false;
-
             var korisnik = await db.Users.AsNoTracking()
                 .Where(u => u.Id == userId)
                 .Select(u => new { u.Id, u.Email, u.EmailConfirmed })
@@ -70,8 +109,9 @@ public sealed class ListaCekanjaBonus(
 
             if (korisnik is null || !korisnik.EmailConfirmed || korisnik.Email is null) return false;
 
-            if (lista.Nadji(korisnik.Email) is not { } upisan) return false;
-            if (DatumIzlaska is { } izlazak && upisan > izlazak) return false;
+            var sada = DateTime.UtcNow;
+            if (lista.Nadji(korisnik.Email) is not { } prijava) return false;
+            if (!Vazi(prijava, sada)) return false;
 
             var hes = ListaCekanja.Hes(korisnik.Email);
             if (await db.WaitlistBonuses.AnyAsync(w => w.EmailHash == hes || w.UserId == userId, ct))
@@ -89,7 +129,7 @@ public sealed class ListaCekanjaBonus(
                 EmailHash  = hes,
                 UserId     = userId,
                 Amount     = iznos,
-                SignedUpAt = upisan,
+                SignedUpAt = prijava.Kreirano,
                 AwardedAt  = sada
             });
 
@@ -134,7 +174,8 @@ public sealed class ListaCekanjaBonus(
                 $"Hvala što si nas čekao — {iznos:0.##} tokena za prijavu na listu čekanja je na tvom nalogu.");
 
             // Id, ne mejl — lični podatak ne pripada logu.
-            logger.LogInformation("Bonus liste čekanja: {Iznos} tokena korisniku {UserId}.", iznos, userId);
+            logger.LogInformation("Bonus liste čekanja ({Lista}): {Iznos} tokena korisniku {UserId}.",
+                ListaZa(prijava), iznos, userId);
             return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -153,16 +194,14 @@ public sealed class ListaCekanjaBonus(
     public async Task<int> ProdjiAsync(CancellationToken ct = default)
     {
         if (!Ukljucen) return 0;
-        if (Rok is { } rok && DateTime.UtcNow > rok) return 0;
 
-        var prijave = lista.Prijave();
-        if (prijave.Count == 0) return 0;
-
-        var izlazak = DatumIzlaska;
-        var adrese = prijave
-            .Where(p => izlazak is null || p.Value <= izlazak)
+        var sada = DateTime.UtcNow;
+        var adrese = lista.Prijave()
+            .Where(p => Vazi(p.Value, sada))
             .Select(p => p.Key.ToUpperInvariant())   // Identity: NormalizedEmail je velikim slovima
             .ToList();
+
+        if (adrese.Count == 0) return 0;
 
         var isplaceno = 0;
 
@@ -187,12 +226,21 @@ public sealed class ListaCekanjaBonus(
         return isplaceno;
     }
 
+    /// <summary>Stanje jedne liste za admin pregled.</summary>
+    public sealed record StanjeListe(int NaListi, DateTime? Izlazak, DateTime? Rok);
+
     /// <summary>Brojevi za admin pregled — bez ijedne adrese.</summary>
-    public async Task<(int NaListi, int Isplaceno, decimal Iznos, DateTime? Izlazak, DateTime? Rok, bool Ukljucen)> StanjeAsync(
+    public async Task<(bool Ukljucen, decimal Iznos, int Isplaceno, StanjeListe Android, StanjeListe Ios)> StanjeAsync(
         CancellationToken ct = default)
     {
-        var naListi   = lista.Prijave().Count;
+        var poListi = lista.Prijave().Values
+            .GroupBy(ListaZa)
+            .ToDictionary(g => g.Key, g => g.Count());
+
         var isplaceno = await db.WaitlistBonuses.CountAsync(ct);
-        return (naListi, isplaceno, Iznos, DatumIzlaska, Rok, Ukljucen);
+
+        return (Ukljucen, Iznos, isplaceno,
+            new StanjeListe(poListi.GetValueOrDefault(Android), IzlazakAndroid, Rok(Android)),
+            new StanjeListe(poListi.GetValueOrDefault(Ios),     IzlazakIos,     Rok(Ios)));
     }
 }

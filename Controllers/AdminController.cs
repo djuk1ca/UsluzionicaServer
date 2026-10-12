@@ -144,11 +144,10 @@ public sealed class AdminController(
             data = new
             {
                 ukljucen  = s.Ukljucen,
-                naListi   = s.NaListi,
-                isplaceno = s.Isplaceno,
                 iznos     = s.Iznos,
-                izlazak   = s.Izlazak,
-                rok       = s.Rok
+                isplaceno = s.Isplaceno,
+                android   = new { naListi = s.Android.NaListi, izlazak = s.Android.Izlazak, rok = s.Android.Rok },
+                ios       = new { naListi = s.Ios.NaListi,     izlazak = s.Ios.Izlazak,     rok = s.Ios.Rok }
             }
         });
     }
