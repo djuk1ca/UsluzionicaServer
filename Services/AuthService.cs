@@ -13,6 +13,7 @@ public sealed class AuthService(
     IEmailService                emailService,
     TokenService                 tokenService,
     ReferralService              referralService,
+    ListaCekanjaBonus            listaCekanja,
     IConfiguration               config,
     ILogger<AuthService>         logger)
 {
@@ -459,7 +460,10 @@ public sealed class AuthService(
         // i on mora okinuti prvu referral ratu — inače bi korisnik koji nikad
         // nije kliknuo verifikacioni link ostavio svog pozivaoca bez nagrade.
         if (emailUpravoPotvrdjen)
+        {
             await referralService.TryRewardSignupAsync(user.Id);
+            await listaCekanja.PokusajAsync(user.Id);
+        }
 
         logger.LogInformation("Lozinka resetovana za korisnika {UserId}", user.Id);
         return (true, null);

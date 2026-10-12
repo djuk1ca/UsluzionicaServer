@@ -26,6 +26,7 @@ public sealed class ExternalLoginService(
     AppDbContext                   db,
     AuthService                    authService,
     ReferralService                referralService,
+    ListaCekanjaBonus              listaCekanja,
     UserService                    userService,
     ProfilnaSlikaProvajdera        profilnaSlika,
     ILogger<ExternalLoginService>  logger)
@@ -162,6 +163,7 @@ public sealed class ExternalLoginService(
         // Kod registracije lozinkom prva rata ide tek kad korisnik klikne
         // verifikacioni link. Ovde je mejl već potvrđen, pa ide odmah.
         await referralService.TryRewardSignupAsync(user.Id);
+        await listaCekanja.PokusajAsync(user.Id);
 
         await PreuzmiSlikuAsync(user, id);
 
@@ -199,6 +201,7 @@ public sealed class ExternalLoginService(
             // Mejl je sada dokazano stvaran — isto mesto u toku kao klik na
             // verifikacioni link.
             await referralService.TryRewardSignupAsync(user.Id);
+            await listaCekanja.PokusajAsync(user.Id);
 
             logger.LogWarning(
                 "Nepotvrđen nalog {UserId} povezan sa {Provider}; lozinka uklonjena.",

@@ -26,6 +26,13 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
     /// <summary>Provera slika kojom testovi upravljaju — vidi StubImageModerator.</summary>
     public StubImageModerator ImageModerator { get; } = new();
 
+    /// <summary>
+    /// prijave.jsonl liste čekanja za ovaj test host. Fajl ne postoji dok ga
+    /// test ne napravi — do tada je lista prazna i bonus se ne dodeljuje nikome.
+    /// </summary>
+    public string ListaCekanjaPutanja { get; } =
+        Path.Combine(Path.GetTempPath(), $"usluzionica-lista-{Guid.NewGuid():N}.jsonl");
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // ── Okruženje ───────────────────────────────────────────────────────
@@ -84,6 +91,11 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 // greškom isplati pogrešnu ratu i dalje bi prošao.
                 ["Referral:SignupRewardTokens"]             = "2.0",
                 ["Referral:ProviderActivationRewardTokens"] = "3.0",
+
+                // Bonus liste čekanja: iznos namerno nije 10 (podrazumevano),
+                // da test dokaže da se čita iz konfiguracije.
+                ["Waitlist:Path"]        = ListaCekanjaPutanja,
+                ["Waitlist:BonusTokens"] = "7",
             });
         });
 

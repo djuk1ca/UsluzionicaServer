@@ -125,6 +125,45 @@ public sealed class AdminController(
         return Ok(new { success = true, data = stats });
     }
 
+    // ── LISTA ČEKANJA ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Stanje bonusa za listu čekanja: koliko adresa server vidi na listi i
+    /// koliko je bonusa isplaćeno. Samo brojevi — nijedna adresa.
+    ///
+    /// Prvo što treba pogledati posle deploya: `naListi = 0` uz `ukljucen =
+    /// true` znači da API ne vidi fajl sajta (volumen nije montiran).
+    /// </summary>
+    [HttpGet("waitlist")]
+    public async Task<IActionResult> GetWaitlist([FromServices] ListaCekanjaBonus bonus)
+    {
+        var s = await bonus.StanjeAsync();
+        return Ok(new
+        {
+            success = true,
+            data = new
+            {
+                ukljucen  = s.Ukljucen,
+                naListi   = s.NaListi,
+                isplaceno = s.Isplaceno,
+                iznos     = s.Iznos,
+                izlazak   = s.Izlazak,
+                rok       = s.Rok
+            }
+        });
+    }
+
+    /// <summary>
+    /// Pokreće prolaz kroz listu odmah, umesto da se čeka sledećih 30 minuta.
+    /// Bezbedno je pozvati više puta — bonus se isplaćuje jednom po adresi.
+    /// </summary>
+    [HttpPost("waitlist/run")]
+    public async Task<IActionResult> RunWaitlist([FromServices] ListaCekanjaBonus bonus)
+    {
+        var isplaceno = await bonus.ProdjiAsync(HttpContext.RequestAborted);
+        return Ok(new { success = true, data = new { isplaceno } });
+    }
+
     // ── ANALITIKA ──────────────────────────────────────────────────────────
 
     /// <summary>Dnevni token tokovi za grafikone — zadnjih N dana (default 30).</summary>

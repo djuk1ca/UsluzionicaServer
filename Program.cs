@@ -274,6 +274,10 @@ builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ListingService>();
 builder.Services.AddScoped<ProviderService>();
 builder.Services.AddScoped<ReferralService>();
+// Bonus za listu čekanja sa sajta (Waitlist:*). Čitač je singleton jer drži
+// parsiranu listu dok se fajl ne promeni.
+builder.Services.AddSingleton<ListaCekanja>();
+builder.Services.AddScoped<ListaCekanjaBonus>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<PodsetnikZaIzvrsenje>();
@@ -363,6 +367,8 @@ builder.Services.AddHostedService<MessageCleanupService>();
 builder.Services.AddHostedService<BoostExpiryService>();
 // Podsetnik uslugodavcu kad „Izvršeno" postane dostupno (svakih 15 min)
 builder.Services.AddHostedService<PodsetnikZaIzvrsenjeService>();
+// Bonus liste čekanja za naloge potvrđene pre upisa na sajtu (svakih 30 min)
+builder.Services.AddHostedService<ListaCekanjaBonusService>();
 
 // ── Controllers + Swagger ─────────────────────────────────────────────────
 // Slike se u bazi čuvaju relativno; pun URL se sastavlja pri serijalizaciji.
