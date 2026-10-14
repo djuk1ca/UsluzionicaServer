@@ -59,7 +59,9 @@ public sealed class ExternalAuthTickets(IDataProtectionProvider dataProtection)
         string?           ReferralCode);
 
     /// <summary>Karta za ekran „Dovrši nalog".</summary>
-    public sealed record SignupData(ExternalIdentity Identity, string? ReferralCode);
+    /// <param name="AppleRefreshToken">Šifrovan Apple refresh token (AppleNalog.Zasticen) —
+    /// čuva se uz nalog tek kad ga „Dovrši nalog" napravi.</param>
+    public sealed record SignupData(ExternalIdentity Identity, string? ReferralCode, string? AppleRefreshToken = null);
 
     public string ProtectState(StateData data)   => Protect(_state,  data, StateLifetime);
     public string ProtectResult(ResultData data) => Protect(_result, data, ResultLifetime);

@@ -13,6 +13,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Serilog;
 using UsluzionicaServer.Infrastructure.Push;
+using UsluzionicaServer.Infrastructure.Apple;
 using UsluzionicaServer.Infrastructure.ExternalAuth;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Hubs;
@@ -314,6 +315,21 @@ else
 {
     builder.Services.AddSingleton<IPushSender, NoopPushSender>();
 }
+
+// ── Apple: push na iPhone (APNs) i Sign in with Apple ──────────────────────
+// Jedan `.p8` ključ za oba (Apple__TeamId, Apple__KeyId, Apple__PrivateKey).
+// Bez njega: iOS push je prazan, a /api/auth/apple javlja „nije dostupno" —
+// isti obrazac kao Firebase. HTTP/2 je obavezan za APNs.
+builder.Services.AddSingleton<AppleKljuc>();
+builder.Services.AddHttpClient(ApplePushSender.HttpKlijent, c => c.Timeout = TimeSpan.FromSeconds(10))
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler { EnableMultipleHttp2Connections = true });
+builder.Services.AddHttpClient(AppleSignIn.HttpKlijent, c => c.Timeout = TimeSpan.FromSeconds(10));
+builder.Services.AddSingleton<IAppleSignIn, AppleSignIn>();
+builder.Services.AddScoped<AppleNalog>();
+builder.Services.AddSingleton<IApplePushSender>(sp =>
+    sp.GetRequiredService<AppleKljuc>().Podesen
+        ? ActivatorUtilities.CreateInstance<ApplePushSender>(sp)
+        : ActivatorUtilities.CreateInstance<NoopApplePushSender>(sp));
 
 // ── Prijava preko Google-a i Facebook-a ────────────────────────────────────
 // Oba provajdera se UVEK registruju; bez ključeva `IsConfigured` vraća false i
