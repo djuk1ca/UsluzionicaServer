@@ -16,7 +16,7 @@ namespace UsluzionicaServer.IntegrationTests.Api;
 /// </summary>
 public class AppleSignInTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
 {
-    private static async Task<JsonElement> Data(HttpResponseMessage r) =>
+    private static async Task<JsonElement> Podaci(HttpResponseMessage r) =>
         (await r.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("data");
 
     private Task<HttpResponseMessage> Prijava(HttpClient c, string idToken, string? kod = "kod-1", string? ime = null) =>
@@ -31,7 +31,7 @@ public class AppleSignInTests(DatabaseFixture fixture) : IntegrationTestBase(fix
         // 1. Prva prijava — nalog još ne postoji.
         var prva = await Prijava(c, "tok-ana", kod: "kod-ana", ime: "Ana Apple");
         prva.StatusCode.Should().Be(HttpStatusCode.OK);
-        var signup = await Data(prva);
+        var signup = await Podaci(prva);
         signup.GetProperty("status").GetString().Should().Be("signup");
         signup.GetProperty("fullName").GetString().Should().Be("Ana Apple");
 
@@ -54,7 +54,7 @@ public class AppleSignInTests(DatabaseFixture fixture) : IntegrationTestBase(fix
         sacuvan.Should().NotBeNullOrEmpty().And.NotContain("refresh-kod-ana");
 
         // 3. Ponovna prijava istim Apple nalogom → odmah tokeni.
-        var druga = await Data(await Prijava(c, "tok-ana", kod: "kod-ana-2"));
+        var druga = await Podaci(await Prijava(c, "tok-ana", kod: "kod-ana-2"));
         druga.GetProperty("status").GetString().Should().Be("ok");
         druga.GetProperty("auth").GetProperty("accessToken").GetString().Should().NotBeNullOrEmpty();
 
