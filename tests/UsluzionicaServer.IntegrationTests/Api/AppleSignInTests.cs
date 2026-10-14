@@ -66,6 +66,45 @@ public class AppleSignInTests(DatabaseFixture fixture) : IntegrationTestBase(fix
     }
 
     [Fact]
+    public async Task SaListeCekanja_BonusOstajeUBalansu_PosleCuvanjaAppleTokena()
+    {
+        // 14.10. na iPhone-u: ledger je imao „+10 Bonus za listu čekanja", a
+        // balans 0. Bonus se upisuje SQL-om mimo change trackera, a odmah
+        // zatim čuvanje Apple refresh tokena (UserManager → UpdateAsync) je
+        // upisivalo stari balans iz memorije preko njega.
+        const string email = "lista@privaterelay.appleid.com";
+        File.AppendAllText(Factory.ListaCekanjaPutanja, JsonSerializer.Serialize(new
+        {
+            kontakt  = email,
+            tip      = "email",
+            izvor    = "hero",
+            platforma = "ios",
+            kreirano = DateTimeOffset.UtcNow.AddDays(-3).ToString("O")
+        }) + Environment.NewLine);
+
+        var c = Factory.CreateClient();
+        Factory.Apple.Nauci("tok-lista", new AppleIdentitet("apple-sub-lista", email, true));
+
+        var signup = await Podaci(await Prijava(c, "tok-lista", kod: "kod-lista", ime: "Lista Apple"));
+        var reg = await c.PostAsJsonAsync("/api/auth/external/register", new
+        {
+            signupToken    = signup.GetProperty("signupToken").GetString(),
+            fullName       = "Lista Apple",
+            city           = TestData.ValidCity,
+            acceptedPolicy = true
+        });
+        reg.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Factory postavlja Waitlist:BonusTokens = 7.
+        var user = await Query(db => db.Users.SingleAsync(u => u.Email == email));
+        user.TokenBalance.Should().Be(7m, "bonus ne sme da pregazi čuvanje Apple tokena");
+
+        // I odgovor na registraciju nosi novi balans — aplikacija ga odmah prikazuje.
+        var odgovor = await Podaci(reg);
+        odgovor.GetProperty("user").GetProperty("tokenBalance").GetDecimal().Should().Be(7m);
+    }
+
+    [Fact]
     public async Task NevazeciToken_Odbijen()
     {
         var r = await Prijava(Factory.CreateClient(), "nepoznat-token");
