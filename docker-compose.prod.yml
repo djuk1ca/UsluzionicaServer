@@ -108,6 +108,16 @@ services:
       # korisnicima u ime aplikacije.
       Firebase__ServiceAccountJson: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
 
+      # ── APPLE: PUSH NA iPHONE I SIGN IN WITH APPLE ───────────────────────
+      # Jedan .p8 ključ (Apple Developer → Keys, sa APNs + Sign in with Apple).
+      # APPLE_PRIVATE_KEY = base64 celog .p8 fajla, u jednom redu:
+      #   PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("AuthKey_XXXX.p8"))
+      # Prazno je DOZVOLJENO — tada nema iOS push-a ni Apple prijave, ostalo radi.
+      # Ključ je tajna ravna lozinci: šalje push svim iPhone korisnicima.
+      Apple__TeamId: ${APPLE_TEAM_ID:-}
+      Apple__KeyId: ${APPLE_KEY_ID:-}
+      Apple__PrivateKey: ${APPLE_PRIVATE_KEY:-}
+
       # ── PRIJAVA PREKO FACEBOOK-A I GOOGLE-A ──────────────────────────────
       # Prazno je DOZVOLJENO — provajder je tada isključen, a prijava lozinkom
       # radi normalno. Isti razlog kao za FCM: nepodešena prijava ne sme da

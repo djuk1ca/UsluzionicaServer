@@ -4,6 +4,7 @@ using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.DTOs.Users;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.Infrastructure;
+using UsluzionicaServer.Infrastructure.Apple;
 using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Persistence;
 
@@ -15,6 +16,7 @@ public sealed class UserService(
     IWebHostEnvironment          env,
     IConfiguration               config,
     ImageModerationGate          imageGate,
+    AppleNalog                   appleNalog,
     ILogger<UserService>         logger)
 {
     // ── GET profil ─────────────────────────────────────────────────────────
@@ -191,6 +193,11 @@ public sealed class UserService(
         // ExternalLoginService bi pronašao TAJ nalog i odbio je kao deaktiviranu
         // — dakle ne bi mogla ni da napravi nov nalog. Brisanje mora da znači
         // da osoba može da počne ispočetka.
+        //
+        // Apple to traži i sa svoje strane (pravilo 5.1.1(v)): prijava se
+        // poništava i kod Apple-a, ne samo kod nas. Ne baca ako Apple ne odgovori.
+        await appleNalog.OpozoviAsync(user);
+
         foreach (var veza in await userManager.GetLoginsAsync(user))
             await userManager.RemoveLoginAsync(user, veza.LoginProvider, veza.ProviderKey);
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.DTOs.Auth;
+using UsluzionicaServer.Infrastructure.Apple;
 using UsluzionicaServer.Infrastructure.ExternalAuth;
 using UsluzionicaServer.Services;
 using static UsluzionicaServer.Services.ExternalLoginService;
@@ -36,6 +37,8 @@ public sealed class ExternalAuthController(
     ExternalLoginService               externalLogin,
     AuthService                        authService,
     UserManager<ApplicationUser>       userManager,
+    IAppleSignIn                       apple,
+    AppleNalog                         appleNalog,
     IConfiguration                     config,
     ILogger<ExternalAuthController>    logger) : ControllerBase
 {
@@ -55,7 +58,9 @@ public sealed class ExternalAuthController(
         Ok(new
         {
             success = true,
-            data    = providers.Where(p => p.IsConfigured).Select(p => p.Name).ToList()
+            data    = providers.Where(p => p.IsConfigured).Select(p => p.Name)
+                .Concat(apple.Podesen ? [AppleNalog.Provajder] : [])
+                .ToList()
         });
 
     // ── GET /api/auth/{provider}/start ─────────────────────────────────────
@@ -203,11 +208,87 @@ public sealed class ExternalAuthController(
         if (user is null)
             return BadRequest(new { success = false, message = greska });
 
+        // Apple: refresh token je čekao u karti dok nalog ne nastane.
+        if (karta.AppleRefreshToken is { } zasticen)
+            await appleNalog.SacuvajAsync(user, zasticen, vecZasticen: true);
+
         var auth = await authService.IssueTokensAsync(user);
         return Ok(new { success = true, data = auth });
     }
 
     // ── Pomoćne ────────────────────────────────────────────────────────────
+
+    // ── POST /api/auth/apple ───────────────────────────────────────────────
+    /// <summary>
+    /// Sign in with Apple sa iPhone-a. Izvorni Apple prozor vraća aplikaciji
+    /// identityToken (JWT od Apple-a) — nema preusmeravanja kroz server kao kod
+    /// Google-a, pa ni PKCE karte. Ishod je isti oblik kao /external/exchange,
+    /// da bi aplikacija posle prijave radila jednako za sve provajdere.
+    ///
+    /// Odbijanje vraća `code` (nema-email, deaktiviran, nalog-postoji…) — isti
+    /// kodovi kao u povratnoj adresi Google prijave, aplikacija ih već prevodi.
+    /// </summary>
+    [HttpPost("apple")]
+    [EnableRateLimiting("oauth")]
+    [ProducesResponseType(typeof(ExternalExchangeResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> Apple([FromBody] AppleSignInRequest req, CancellationToken ct)
+    {
+        if (!apple.Podesen)
+            return BadRequest(new { success = false, code = Greske.NijePodeseno,
+                                    message = "Prijava preko Apple-a trenutno nije dostupna." });
+
+        var id = await apple.ProveriAsync(req.IdentityToken, ct);
+        if (id is null)
+            return BadRequest(new { success = false, code = Greske.Opsta,
+                                    message = "Prijava preko Apple-a nije uspela. Pokušaj ponovo." });
+
+        // Apple garantuje mejl koji šalje (i relej) — EmailVerified sledi njegov claim.
+        var identitet = new ExternalIdentity(
+            AppleNalog.Provajder, id.Sub, id.Email, id.EmailPotvrdjen, req.FullName?.Trim() ?? "");
+
+        var ishod = await externalLogin.RazresiAsync(identitet);
+        if (ishod is Odbijen odbijen)
+            return BadRequest(new { success = false, code = odbijen.Greska,
+                                    message = PorukaOdbijanja(odbijen.Greska) });
+
+        // Kod važi 5 minuta i jednom — menja se odmah, i za postojeći nalog
+        // (osveži token) i za nov (čeka u karti).
+        var refresh = await apple.RefreshTokenAsync(req.AuthorizationCode ?? "", ct);
+
+        if (ishod is Prijavljen prijavljen)
+        {
+            await appleNalog.SacuvajAsync(prijavljen.User, refresh);
+            var auth = await authService.IssueTokensAsync(prijavljen.User);
+            return Ok(new { success = true, data = new ExternalExchangeResponse { Status = "ok", Auth = auth } });
+        }
+
+        return Ok(new
+        {
+            success = true,
+            data    = new ExternalExchangeResponse
+            {
+                Status      = "signup",
+                SignupToken = tickets.ProtectSignup(new(identitet, NormalizujReferral(req.ReferralCode),
+                                  refresh is null ? null : appleNalog.Zasticen(refresh))),
+                FullName    = identitet.Name,
+                Email       = identitet.Email,
+                Provider    = identitet.Provider
+            }
+        });
+    }
+
+    /// <summary>
+    /// Isti tekstovi kao u aplikaciji za Google tok (SocijalnaPrijava.PorukaZa) —
+    /// ovde jer Apple tok odgovara JSON-om, a aplikacija prikazuje `message`.
+    /// </summary>
+    private static string PorukaOdbijanja(string kod) => kod switch
+    {
+        Greske.NemaEmail    => "Nalog nema email adresu, ili nisi dozvolio da je podeli. Prijavi se drugim načinom.",
+        Greske.NalogPostoji => "Nalog sa ovom email adresom već postoji. Prijavi se načinom kojim si ga napravio.",
+        Greske.Deaktiviran  => "Nalog je deaktiviran. Kontaktiraj podršku.",
+        _                   => "Prijava preko Apple-a nije uspela. Pokušaj ponovo."
+    };
 
     private IExternalAuthProvider? Nadji(string name) =>
         providers.FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
