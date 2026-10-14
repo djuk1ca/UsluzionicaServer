@@ -22,6 +22,7 @@ public sealed class NotificationService(
     AppDbContext                       db,
     IHubContext<NotificationHub>       hubContext,
     IPushSender                        pushSender,
+    IApplePushSender                   applePush,
     ILogger<NotificationService>       logger)
 {
     // ── SEND ───────────────────────────────────────────────────────────────
@@ -78,18 +79,24 @@ public sealed class NotificationService(
         // stići će kroz GET /api/notifications.
         try
         {
-            var tokeni = await db.DeviceTokens
+            var uredjaji = await db.DeviceTokens
                 .Where(t => t.UserId == userId)
-                .Select(t => t.Token)
+                .Select(t => new { t.Token, t.Platform })
                 .ToListAsync();
 
-            if (tokeni.Count > 0)
+            if (uredjaji.Count > 0)
             {
-                var mrtvi = (await pushSender.SendAsync(
-                    tokeni,
-                    new PushMessage(notif.Id, kind.ToString(), title, body, referenceId))).ToList();
+                var poruka = new PushMessage(notif.Id, kind.ToString(), title, body, referenceId);
 
-                // Tokene koje je FCM odbio kao nepostojeće brišemo odmah.
+                // iPhone ide direktno na APNs, sve ostalo na FCM — vidi ApplePushSender.
+                var ios     = uredjaji.Where(u => u.Platform == "ios").Select(u => u.Token).ToList();
+                var android = uredjaji.Where(u => u.Platform != "ios").Select(u => u.Token).ToList();
+
+                var mrtvi = new List<string>();
+                if (android.Count > 0) mrtvi.AddRange(await pushSender.SendAsync(android, poruka));
+                if (ios.Count > 0)     mrtvi.AddRange(await applePush.SendAsync(ios, poruka));
+
+                // Tokene koje je FCM ili APNs odbio kao nepostojeće brišemo odmah.
                 // Bez toga tabela raste zauvek, a svako slanje čeka i na uređaje
                 // kojih odavno nema — što usporava isporuku svima ostalima.
                 if (mrtvi.Count > 0)
@@ -99,7 +106,7 @@ public sealed class NotificationService(
                         .ExecuteDeleteAsync();
 
                     logger.LogInformation(
-                        "Obrisano {Count} mrtvih FCM tokena korisnika {UserId}.", mrtvi.Count, userId);
+                        "Obrisano {Count} mrtvih push tokena korisnika {UserId}.", mrtvi.Count, userId);
                 }
             }
         }

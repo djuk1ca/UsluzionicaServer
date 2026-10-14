@@ -26,6 +26,9 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
     /// <summary>Provera slika kojom testovi upravljaju — vidi StubImageModerator.</summary>
     public StubImageModerator ImageModerator { get; } = new();
 
+    /// <summary>Sign in with Apple kojim testovi upravljaju — vidi FakeAppleSignIn.</summary>
+    public FakeAppleSignIn Apple { get; } = new();
+
     /// <summary>
     /// prijave.jsonl liste čekanja za ovaj test host. Fajl ne postoji dok ga
     /// test ne napravi — do tada je lista prazna i bonus se ne dodeljuje nikome.
@@ -118,6 +121,10 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
             // slika prolazila i test ne bi imao šta da dokaže.
             services.RemoveAll<IImageModerator>();
             services.AddSingleton<IImageModerator>(ImageModerator);
+
+            // ── Zameni Sign in with Apple ───────────────────────────────────
+            services.RemoveAll<UsluzionicaServer.Infrastructure.Apple.IAppleSignIn>();
+            services.AddSingleton<UsluzionicaServer.Infrastructure.Apple.IAppleSignIn>(Apple);
         });
     }
 }

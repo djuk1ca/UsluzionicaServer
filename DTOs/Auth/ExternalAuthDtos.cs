@@ -66,3 +66,26 @@ public sealed class ExternalRegisterRequest
     [StringLength(40)]
     public string? AcquisitionSource { get; set; }
 }
+
+/// <summary>
+/// Sign in with Apple sa iPhone-a (izvorni Apple prozor, bez pregledača).
+/// Odgovor je isti <see cref="ExternalExchangeResponse"/> kao posle Google
+/// prijave: „ok" sa tokenima ili „signup" za ekran „Dovrši nalog".
+/// </summary>
+public sealed class AppleSignInRequest
+{
+    /// <summary>JWT koji je Apple potpisao — server ga proverava.</summary>
+    [Required, MaxLength(8000)]
+    public string IdentityToken { get; set; } = string.Empty;
+
+    /// <summary>Jednokratni kod; server ga menja za refresh token (poništavanje pri brisanju naloga).</summary>
+    [MaxLength(2000)]
+    public string? AuthorizationCode { get; set; }
+
+    /// <summary>Ime — Apple ga daje SAMO pri prvoj prijavi, i to aplikaciji, ne u tokenu.</summary>
+    [MaxLength(100)]
+    public string? FullName { get; set; }
+
+    [MaxLength(20)]
+    public string? ReferralCode { get; set; }
+}
