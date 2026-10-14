@@ -171,6 +171,7 @@ public sealed class ReferralService(
             .Where(u => u.Id == referrerId)
             .Select(u => u.TokenBalance)
             .FirstAsync();
+        db.UskladiBalans(referrerId, balansPosle);
 
         db.TokenTransactions.Add(new TokenTransaction
         {

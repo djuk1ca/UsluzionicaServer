@@ -50,6 +50,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
         RefreshSearchIndex();
+        ZastitiBalans();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -57,7 +58,50 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
     {
         RefreshSearchIndex();
+        ZastitiBalans();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    // ── Zaštita balansa tokena ─────────────────────────────────────────────
+    // Isplate (lista čekanja, referral, boost…) menjaju TokenBalance jednom
+    // SQL naredbom (ExecuteUpdate: SET balance = balance + @x) — mimo change
+    // trackera. Ako je isti korisnik u tom zahtevu već učitan, njegov objekat
+    // u memoriji i dalje drži STARI balans.
+    //
+    // Identity-jev UserManager.UpdateAsync radi Context.Update(user), koji
+    // označava SVE kolone kao izmenjene — pa bi sledeće čuvanje naloga (Apple
+    // token, profilna slika, potvrda mejla…) upisalo stari balans preko nove
+    // isplate. Tako je 14.10. bonus za listu čekanja nestao odmah posle
+    // registracije preko Apple-a: ledger je imao +10, balans je bio 0.
+    //
+    // Zato se TokenBalance upisuje SAMO kad ga je kod zaista promenio na
+    // učitanom objektu (trenutna vrednost ≠ učitana). Inače ostaje van UPDATE-a.
+    private void ZastitiBalans()
+    {
+        foreach (var entry in ChangeTracker.Entries<ApplicationUser>())
+        {
+            if (entry.State != EntityState.Modified) continue;
+
+            var balans = entry.Property(u => u.TokenBalance);
+            if (balans.IsModified && balans.CurrentValue == balans.OriginalValue)
+                balans.IsModified = false;
+        }
+    }
+
+    /// <summary>
+    /// Posle ExecuteUpdate nad TokenBalance: usklađuje korisnika koji je u ovom
+    /// kontekstu već učitan, da i odgovor (npr. balans u odgovoru na prijavu) i
+    /// sledeće čuvanje vide novu vrednost. Ako nije učitan — ne radi ništa.
+    /// </summary>
+    public void UskladiBalans(string userId, decimal balans)
+    {
+        var entry = ChangeTracker.Entries<ApplicationUser>().FirstOrDefault(e => e.Entity.Id == userId);
+        if (entry is null) return;
+
+        var p = entry.Property(u => u.TokenBalance);
+        p.CurrentValue  = balans;
+        p.OriginalValue = balans;
+        p.IsModified    = false;
     }
 
     private void RefreshSearchIndex()
