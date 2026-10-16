@@ -101,7 +101,7 @@ public class MarketingZahteviTests(DatabaseFixture fixture) : IntegrationTestBas
             .Select(l => new { l.Description, l.Status })
             .ToListAsync());
 
-        oglasi.Should().HaveCount(10, "8 uslugodavaca + 2 oglasa demo klijentkinje");
+        oglasi.Should().HaveCount(12, "10 uslugodavaca + 2 oglasa demo klijentkinje");
         oglasi.Should().OnlyContain(o => o.Description.Length >= 200,
             "potpun oglas ima opis od bar 200 znakova (Marketing 03 §9)");
 
@@ -193,7 +193,7 @@ public class MarketingZahteviTests(DatabaseFixture fixture) : IntegrationTestBas
             .Select(l => l.Id).ToListAsync());
         mojiOglasi.Should().HaveCount(2);
 
-        (await Query(db => db.Reviews.AnyAsync(r => mojiOglasi.Contains(r.ListingId) && r.AuthorId == demo.Id)))
+        (await Query(db => db.Reviews.AnyAsync(r => r.ListingId != null && mojiOglasi.Contains(r.ListingId.Value) && r.AuthorId == demo.Id)))
             .Should().BeFalse("niko ne ocenjuje sopstveni oglas");
     }
 }

@@ -26,6 +26,7 @@ using UsluzionicaServer.Infrastructure.Search;
 using UsluzionicaServer.Middleware;
 using UsluzionicaServer.Persistence;
 using UsluzionicaServer.Services;
+using UsluzionicaServer.Services.Jobs;
 
 // ── Serilog ────────────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -279,7 +280,13 @@ builder.Services.AddScoped<ReferralService>();
 // parsiranu listu dok se fajl ne promeni.
 builder.Services.AddSingleton<ListaCekanja>();
 builder.Services.AddScoped<ListaCekanjaBonus>();
+builder.Services.AddScoped<ChatSender>();
 builder.Services.AddScoped<ConversationService>();
+builder.Services.AddSingleton<JobPravila>();
+builder.Services.AddSingleton<JobSlike>();
+builder.Services.AddScoped<JobService>();
+builder.Services.AddScoped<JobApplicationService>();
+builder.Services.AddScoped<JobOdrzavanje>();
 builder.Services.AddScoped<BookingService>();
 builder.Services.AddScoped<PodsetnikZaIzvrsenje>();
 builder.Services.AddScoped<ReviewService>();
@@ -370,6 +377,10 @@ else
 
 // Singleton servisi (žive dok god živi aplikacija)
 builder.Services.AddSingleton<MessageEncryption>();
+// Slike u četu: šifrovane, van wwwroot-a, potpisan URL (ChatMedia:Path).
+builder.Services.AddSingleton<UsluzionicaServer.Infrastructure.ChatMedia.ChatMediaStore>();
+builder.Services.AddScoped<ChatImageService>();
+builder.Services.AddScoped<PorukeCiscenje>();
 builder.Services.AddSingleton<OnlineTracker>();
 
 // Foldovana imena 188 kategorija, keširana u memoriji sa TTL-om.
@@ -385,6 +396,10 @@ builder.Services.AddHostedService<BoostExpiryService>();
 builder.Services.AddHostedService<PodsetnikZaIzvrsenjeService>();
 // Bonus liste čekanja za naloge potvrđene pre upisa na sajtu (svakih 30 min)
 builder.Services.AddHostedService<ListaCekanjaBonusService>();
+// Poslovi: istek, podsetnici, trajno brisanje (svakih 15 min)
+builder.Services.AddHostedService<JobCleanupService>();
+// Ocene kojima je prošao rok bez druge strane postaju vidljive (svakih 15 min)
+builder.Services.AddHostedService<ReviewRevealService>();
 
 // ── Controllers + Swagger ─────────────────────────────────────────────────
 // Slike se u bazi čuvaju relativno; pun URL se sastavlja pri serijalizaciji.
@@ -502,6 +517,8 @@ var emailPermitLimit  = builder.Configuration.GetValue("RateLimit:EmailPermitLim
 var emailWindowSeconds= builder.Configuration.GetValue("RateLimit:EmailWindowSeconds", 900);
 var reportPermitLimit = builder.Configuration.GetValue("RateLimit:ReportPermitLimit", 10);
 var reportWindowHours = builder.Configuration.GetValue("RateLimit:ReportWindowHours",  24);
+var jobPermitLimit    = builder.Configuration.GetValue("RateLimit:JobPermitLimit",    10);
+var chatImagePermitLimit = builder.Configuration.GetValue("RateLimit:ChatImagePermitLimit", 20);
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -568,6 +585,38 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit  = 0
             }));
 
+    // Slike u četu — 20 u 10 minuta po nalogu. Dovoljno za „5 odjednom" više
+    // puta zaredom, a ne dozvoljava da jedan nalog zatrpa disk (slike traju
+    // 14 dana, šifrovane, ~300 KB svaka).
+    options.AddPolicy("chat-images", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirst(
+                              System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = chatImagePermitLimit,
+                Window      = TimeSpan.FromMinutes(10),
+                QueueLimit  = 0
+            }));
+
+    // Objava poslova — 10 dnevno po nalogu (po korisniku, kao „reports").
+    // Plafon od 5 aktivnih ne sprečava objavi-obriši-objavi u krug, a svaka
+    // objava šalje posao u „Za tebe" uslugodavcima iz tog grada.
+    options.AddPolicy("jobs", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirst(
+                              System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = jobPermitLimit,
+                Window      = TimeSpan.FromHours(24),
+                QueueLimit  = 0
+            }));
+
     options.OnRejected = async (context, ct) =>
     {
         context.HttpContext.Response.ContentType = "application/json";
@@ -620,9 +669,16 @@ using (var scope = app.Services.CreateScope())
 
     // Samo uz DemoSeed:Enabled=true i nikad u Production (provereno pri startu).
     if (UsluzionicaServer.Infrastructure.Demo.DemoSeed.JeUkljucen(builder.Configuration))
+    {
         await UsluzionicaServer.Infrastructure.Demo.DemoSeed.RunAsync(
             scope.ServiceProvider, builder.Configuration,
             scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+        await UsluzionicaServer.Infrastructure.Demo.DemoSeedPoslovi.RunAsync(
+            scope.ServiceProvider, scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+        await UsluzionicaServer.Infrastructure.Demo.DemoSeedSlikeUCetu.RunAsync(
+            scope.ServiceProvider, builder.Configuration,
+            scope.ServiceProvider.GetRequiredService<ILogger<Program>>());
+    }
 }
 
 // ── Middleware pipeline ────────────────────────────────────────────────────

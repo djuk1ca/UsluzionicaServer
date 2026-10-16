@@ -34,11 +34,44 @@ public sealed class ImageModerationGate(
     /// Popunjeno za slike oglasa. Za avatar i cover je null — tada se prijavljuje
     /// korisnik, jer oglas nije ni u igri.
     /// </param>
+    /// <param name="jobId">Popunjeno za slike posla — tada se prijavljuje posao.</param>
     /// <returns>
     /// <c>Error</c> različit od null znači da upload treba odbiti.
     /// </returns>
     public async Task<(bool Ok, string? Error)> ProveriAsync(
-        IFormFile file, string vlasnikId, int? listingId, CancellationToken ct = default)
+        IFormFile file, string vlasnikId, int? listingId, int? jobId = null, CancellationToken ct = default)
+    {
+        var (presuda, detalji) = await PresudaAsync(file, vlasnikId, listingId, ct);
+
+        switch (presuda)
+        {
+            case ImageVerdict.Allow:
+                return (true, null);
+
+            case ImageVerdict.Reject:
+                logger.LogWarning(
+                    "Slika odbijena automatskom proverom. Korisnik {UserId}, oglas {ListingId}. {Detalji}",
+                    vlasnikId, listingId, detalji);
+
+                // Poruka namerno ne pominje „nudity" ni rezultat provere.
+                // Automatska provera greši, pa optužujuća poruka pogađa i one
+                // koji nisu ništa prekršili.
+                return (false, "Slika nije prihvaćena. Izaberite drugu fotografiju.");
+
+            case ImageVerdict.Review:
+            default:
+                await NapraviAutomatskuPrijavuAsync(vlasnikId, listingId, jobId, detalji, ct);
+                return (true, null);
+        }
+    }
+
+    /// <summary>
+    /// Samo presuda, bez prijave — za slike u četu, gde prijava mora da nosi id
+    /// poruke, a poruka nastaje tek posle provere (vidi ChatImageService).
+    /// Fail-open: pad provere je <see cref="ImageVerdict.Review"/>, ne odbijanje.
+    /// </summary>
+    public async Task<(ImageVerdict Presuda, string? Detalji)> PresudaAsync(
+        IFormFile file, string vlasnikId, int? listingId = null, CancellationToken ct = default)
     {
         await using var stream = file.OpenReadStream();
 
@@ -69,27 +102,12 @@ public sealed class ImageModerationGate(
             detalji = $"Provera nije uspela: {ex.GetType().Name}";
         }
 
-        switch (presuda)
-        {
-            case ImageVerdict.Allow:
-                return (true, null);
-
-            case ImageVerdict.Reject:
-                logger.LogWarning(
-                    "Slika odbijena automatskom proverom. Korisnik {UserId}, oglas {ListingId}. {Detalji}",
-                    vlasnikId, listingId, detalji);
-
-                // Poruka namerno ne pominje „nudity" ni rezultat provere.
-                // Automatska provera greši, pa optužujuća poruka pogađa i one
-                // koji nisu ništa prekršili.
-                return (false, "Slika nije prihvaćena. Izaberite drugu fotografiju.");
-
-            case ImageVerdict.Review:
-            default:
-                await NapraviAutomatskuPrijavuAsync(vlasnikId, listingId, detalji, ct);
-                return (true, null);
-        }
+        return (presuda, detalji);
     }
+
+    /// <summary>Sumnjiva slika iz četa — prijava pošiljaoca, sa porukom kao kontekstom.</summary>
+    public Task PrijaviSlikuIzCetaAsync(string posiljalacId, int messageId, string? detalji, CancellationToken ct = default) =>
+        NapraviAutomatskuPrijavuAsync(posiljalacId, listingId: null, jobId: null, detalji, ct, messageId);
 
     /// <summary>
     /// Prijava koju podnosi sistem, ne korisnik.
@@ -99,7 +117,7 @@ public sealed class ImageModerationGate(
     /// startu (<c>Program.SeedRolesAndAdminAsync</c>), pa uvek postoji.
     /// </summary>
     private async Task NapraviAutomatskuPrijavuAsync(
-        string vlasnikId, int? listingId, string? detalji, CancellationToken ct)
+        string vlasnikId, int? listingId, int? jobId, string? detalji, CancellationToken ct, int? messageId = null)
     {
         var adminId = await PronadjiAdminaAsync();
 
@@ -122,7 +140,9 @@ public sealed class ImageModerationGate(
         var vecPrijavljeno = await db.Reports.AnyAsync(r =>
             r.Status     == ReportStatus.Pending &&
             r.ReporterId == adminId &&
-            (listingId != null ? r.ListingId == listingId : r.ReportedUserId == vlasnikId),
+            (listingId != null ? r.ListingId == listingId
+             : jobId != null   ? r.JobId == jobId
+             : r.ReportedUserId == vlasnikId),
             ct);
 
         if (vecPrijavljeno) return;
@@ -130,9 +150,13 @@ public sealed class ImageModerationGate(
         db.Reports.Add(new Report
         {
             ReporterId     = adminId,
-            TargetType     = listingId is not null ? ReportTargetType.Listing : ReportTargetType.User,
+            TargetType     = listingId is not null ? ReportTargetType.Listing
+                           : jobId is not null     ? ReportTargetType.Job
+                           : ReportTargetType.User,
             ListingId      = listingId,
-            ReportedUserId = listingId is not null ? null : vlasnikId,
+            JobId          = listingId is null ? jobId : null,
+            ReportedUserId = listingId is null && jobId is null ? vlasnikId : null,
+            MessageId      = messageId,
             Reason         = ReportReason.Neprikladno,
             Note           = $"Automatska provera slike: {detalji ?? "bez detalja"}",
             Status         = ReportStatus.Pending,

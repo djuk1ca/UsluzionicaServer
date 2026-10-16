@@ -167,6 +167,16 @@ namespace UsluzionicaServer.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<decimal>("ClientRating")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("decimal(3,2)")
+                        .HasDefaultValue(0m);
+
+                    b.Property<int>("ClientReviewCount")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
                         .HasColumnType("nvarchar(max)");
@@ -2039,6 +2049,250 @@ namespace UsluzionicaServer.Migrations
                     b.ToTable("FavoriteProviders");
                 });
 
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Job", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("ApplicationsSeenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("AssignedApplicationId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("AssignedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AuthorId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTime?>("BoostExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long?>("BoostRemainingOnAssign")
+                        .HasColumnType("bigint");
+
+                    b.Property<decimal>("BoostScore")
+                        .HasColumnType("decimal(8,2)");
+
+                    b.Property<int>("CancelCount")
+                        .HasColumnType("int");
+
+                    b.Property<int>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletableNotifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ExpiredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExpiryNotifiedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsBoosted")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Location")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ModerationState")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<decimal?>("PayAmount")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<DateTime?>("PurgeAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<long?>("RemainingOnAssign")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("SearchBody")
+                        .IsRequired()
+                        .HasColumnType("varchar(max)");
+
+                    b.Property<string>("SearchLocation")
+                        .IsRequired()
+                        .HasMaxLength(420)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(420)");
+
+                    b.Property<string>("SearchTitle")
+                        .IsRequired()
+                        .HasMaxLength(700)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(700)");
+
+                    b.Property<int>("SearchVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("AuthorId", "Status");
+
+                    b.HasIndex("SearchLocation", "Status")
+                        .HasDatabaseName("IX_Jobs_SearchLocation");
+
+                    b.HasIndex("Status", "IsBoosted", "BoostScore", "CreatedAt")
+                        .IsDescending(false, true, true, true)
+                        .HasDatabaseName("IX_Jobs_Search_Open");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("Status", "IsBoosted", "BoostScore", "CreatedAt"), new[] { "SearchTitle", "SearchLocation", "CategoryId", "ExpiresAt" });
+
+                    b.ToTable("Jobs");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobApplication", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("CancelReason")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsReapplied")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<decimal?>("OfferAmount")
+                        .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("ProviderUserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId", "ProviderUserId")
+                        .IsUnique();
+
+                    b.HasIndex("ProviderUserId", "Status");
+
+                    b.ToTable("JobApplications");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobBoost", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("DurationDays")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("StartsAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("TokensSpent")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("JobBoosts");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobImage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("ImageUrl")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("JobId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("JobId");
+
+                    b.ToTable("JobImages");
+                });
+
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Listing", b =>
                 {
                     b.Property<int>("Id")
@@ -2228,6 +2482,16 @@ namespace UsluzionicaServer.Migrations
                     b.Property<bool>("IsRead")
                         .HasColumnType("bit");
 
+                    b.Property<int?>("JobApplicationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("Text");
+
                     b.Property<string>("SenderId")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
@@ -2242,11 +2506,53 @@ namespace UsluzionicaServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("JobApplicationId");
+
                     b.HasIndex("SenderId");
 
                     b.HasIndex("ConversationId", "SentAt");
 
                     b.ToTable("Messages");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.MessageAttachment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Height")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("HeldUntil")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("MessageId")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("NeedsReview")
+                        .HasColumnType("bit");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("StoragePath")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("Width")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId")
+                        .IsUnique();
+
+                    b.ToTable("MessageAttachments");
                 });
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Notification", b =>
@@ -2501,7 +2807,13 @@ namespace UsluzionicaServer.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("JobId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("ListingId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("MessageId")
                         .HasColumnType("int");
 
                     b.Property<string>("Note")
@@ -2542,11 +2854,19 @@ namespace UsluzionicaServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("JobId");
+
                     b.HasIndex("ListingId");
+
+                    b.HasIndex("MessageId");
 
                     b.HasIndex("ReportedUserId");
 
                     b.HasIndex("ResolvedById");
+
+                    b.HasIndex("ReporterId", "JobId")
+                        .IsUnique()
+                        .HasFilter("[Status] = 'Pending' AND [JobId] IS NOT NULL");
 
                     b.HasIndex("ReporterId", "ListingId")
                         .IsUnique()
@@ -2560,7 +2880,7 @@ namespace UsluzionicaServer.Migrations
 
                     b.ToTable("Reports", t =>
                         {
-                            t.HasCheckConstraint("CK_Report_JednaMeta", "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + (CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) = 1");
+                            t.HasCheckConstraint("CK_Report_JednaMeta", "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + (CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) + (CASE WHEN [JobId] IS NULL THEN 0 ELSE 1 END) = 1");
                         });
                 });
 
@@ -2583,30 +2903,66 @@ namespace UsluzionicaServer.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<string>("ContextTitle")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("ListingId")
+                    b.Property<bool>("IsVerified")
+                        .HasColumnType("bit");
+
+                    b.Property<int?>("JobId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ListingId")
                         .HasColumnType("int");
 
                     b.Property<int?>("ProviderProfileId")
                         .HasColumnType("int");
 
+                    b.Property<DateTime?>("PublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("RevealAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<int>("Stars")
                         .HasColumnType("int");
 
+                    b.Property<string>("SubjectRole")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("SubjectUserId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("AuthorId");
+                    b.HasIndex("BookingRequestId");
 
-                    b.HasIndex("BookingRequestId")
-                        .IsUnique()
-                        .HasFilter("[BookingRequestId] IS NOT NULL");
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("ListingId");
 
                     b.HasIndex("ProviderProfileId");
 
-                    b.HasIndex("ListingId", "AuthorId")
-                        .IsUnique();
+                    b.HasIndex("RevealAt")
+                        .HasFilter("[PublishedAt] IS NULL");
+
+                    b.HasIndex("AuthorId", "BookingRequestId")
+                        .IsUnique()
+                        .HasFilter("[BookingRequestId] IS NOT NULL");
+
+                    b.HasIndex("AuthorId", "JobId")
+                        .IsUnique()
+                        .HasFilter("[JobId] IS NOT NULL");
+
+                    b.HasIndex("SubjectUserId", "SubjectRole", "PublishedAt");
 
                     b.ToTable("Reviews");
                 });
@@ -2972,6 +3328,74 @@ namespace UsluzionicaServer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Job", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "Author")
+                        .WithMany()
+                        .HasForeignKey("AuthorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Author");
+
+                    b.Navigation("Category");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobApplication", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Job", "Job")
+                        .WithMany("Applications")
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "Provider")
+                        .WithMany()
+                        .HasForeignKey("ProviderUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Job");
+
+                    b.Navigation("Provider");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobBoost", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Job", "Job")
+                        .WithMany("Boosts")
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Job");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.JobImage", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Job", "Job")
+                        .WithMany("Images")
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Job");
+                });
+
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Listing", b =>
                 {
                     b.HasOne("UsluzionicaServer.Domain.Entities.Category", "Category")
@@ -3029,6 +3453,11 @@ namespace UsluzionicaServer.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("UsluzionicaServer.Domain.Entities.JobApplication", "JobApplication")
+                        .WithMany()
+                        .HasForeignKey("JobApplicationId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "Sender")
                         .WithMany("SentMessages")
                         .HasForeignKey("SenderId")
@@ -3037,7 +3466,20 @@ namespace UsluzionicaServer.Migrations
 
                     b.Navigation("Conversation");
 
+                    b.Navigation("JobApplication");
+
                     b.Navigation("Sender");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.MessageAttachment", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Message", "Message")
+                        .WithOne("Attachment")
+                        .HasForeignKey("UsluzionicaServer.Domain.Entities.MessageAttachment", "MessageId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Message");
                 });
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Notification", b =>
@@ -3124,10 +3566,20 @@ namespace UsluzionicaServer.Migrations
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Report", b =>
                 {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Job", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("UsluzionicaServer.Domain.Entities.Listing", "Listing")
                         .WithMany()
                         .HasForeignKey("ListingId")
                         .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Message", "Message")
+                        .WithMany()
+                        .HasForeignKey("MessageId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "ReportedUser")
                         .WithMany()
@@ -3145,7 +3597,11 @@ namespace UsluzionicaServer.Migrations
                         .HasForeignKey("ResolvedById")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.Navigation("Job");
+
                     b.Navigation("Listing");
+
+                    b.Navigation("Message");
 
                     b.Navigation("ReportedUser");
 
@@ -3163,25 +3619,39 @@ namespace UsluzionicaServer.Migrations
                         .IsRequired();
 
                     b.HasOne("UsluzionicaServer.Domain.Entities.BookingRequest", "BookingRequest")
-                        .WithOne("Review")
-                        .HasForeignKey("UsluzionicaServer.Domain.Entities.Review", "BookingRequestId")
+                        .WithMany("Reviews")
+                        .HasForeignKey("BookingRequestId")
                         .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Job", "Job")
+                        .WithMany()
+                        .HasForeignKey("JobId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("UsluzionicaServer.Domain.Entities.Listing", "Listing")
                         .WithMany("Reviews")
                         .HasForeignKey("ListingId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Cascade);
 
                     b.HasOne("UsluzionicaServer.Domain.Entities.ProviderProfile", null)
                         .WithMany("Reviews")
                         .HasForeignKey("ProviderProfileId");
 
+                    b.HasOne("UsluzionicaServer.Domain.Entities.ApplicationUser", "Subject")
+                        .WithMany()
+                        .HasForeignKey("SubjectUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Author");
 
                     b.Navigation("BookingRequest");
 
+                    b.Navigation("Job");
+
                     b.Navigation("Listing");
+
+                    b.Navigation("Subject");
                 });
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ServiceExecution", b =>
@@ -3271,7 +3741,7 @@ namespace UsluzionicaServer.Migrations
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.BookingRequest", b =>
                 {
-                    b.Navigation("Review");
+                    b.Navigation("Reviews");
 
                     b.Navigation("ServiceExecution");
                 });
@@ -3292,6 +3762,15 @@ namespace UsluzionicaServer.Migrations
                     b.Navigation("Messages");
                 });
 
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Job", b =>
+                {
+                    b.Navigation("Applications");
+
+                    b.Navigation("Boosts");
+
+                    b.Navigation("Images");
+                });
+
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Listing", b =>
                 {
                     b.Navigation("BookingRequests");
@@ -3303,6 +3782,11 @@ namespace UsluzionicaServer.Migrations
                     b.Navigation("Images");
 
                     b.Navigation("Reviews");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.Message", b =>
+                {
+                    b.Navigation("Attachment");
                 });
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ProviderProfile", b =>

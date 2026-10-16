@@ -21,6 +21,10 @@ public abstract class IntegrationTestBase(DatabaseFixture fixture) : IAsyncLifet
         await fixture.ResetAsync();
         Email.Clear();
         Factory.ImageModerator.Reset();
+
+        // Slike iz četa — baza je prazna, pa i disk mora biti.
+        if (Directory.Exists(Factory.ChatMediaPath))
+            Directory.Delete(Factory.ChatMediaPath, recursive: true);
         Data = new TestData(Factory);
     }
 

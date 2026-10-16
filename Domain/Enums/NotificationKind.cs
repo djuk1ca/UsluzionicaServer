@@ -33,5 +33,39 @@ public enum NotificationKind
     /// Provider: isteklo je čekanje posle prihvatanja i usluga sada može da se
     /// označi kao izvršena. Šalje PodsetnikZaIzvrsenje, jednom po zahtevu.
     /// </summary>
-    BookingExecutable
+    BookingExecutable,
+
+    // ── Poslovi ────────────────────────────────────────────────────────────
+    // Referenca je uvek ID POSLA. Tekstovi: Plan Poslova §3.6.
+
+    /// <summary>Autor: neko se javio na posao.</summary>
+    JobApplicationReceived,
+    /// <summary>Uslugodavac: izabran je za posao.</summary>
+    JobChosen,
+    /// <summary>Ostali koji su se javili: autor je izabrao drugog.</summary>
+    JobNotChosen,
+    /// <summary>Izvršilac: autor je otkazao dogovor.</summary>
+    JobAssignmentCancelled,
+    /// <summary>Ostali koji su se javili: posao je ponovo otvoren.</summary>
+    JobReopened,
+    /// <summary>Autor: izvršilac je odustao.</summary>
+    JobWorkerQuit,
+    /// <summary>Svi koji su se javili: autor je obrisao posao.</summary>
+    JobRemoved,
+    /// <summary>Autor: posao ističe za 24 h.</summary>
+    JobExpiringSoon,
+    /// <summary>Autor: posao je istekao (7 dana za produženje).</summary>
+    JobExpired,
+    /// <summary>Autor: prošlo je čekanje, posao može da se označi kao izvršen.</summary>
+    JobCompletable,
+    /// <summary>Obe strane: posao je izvršen, tokeni isplaćeni.</summary>
+    JobCompleted,
+
+    // ── Ocene ──────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Druga strana te je ocenila — oceni i ti da vidiš ocenu. Referenca je
+    /// zahtev (usluga) ili posao; ReferenceType u telu nije potreban jer
+    /// klijent vodi na ekran sa svim ocenama koje čekaju.
+    /// </summary>
+    ReviewRequested
 }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Infrastructure.Redis;
 using UsluzionicaServer.Persistence;
+using UsluzionicaServer.Services;
 
 namespace UsluzionicaServer.Infrastructure;
 
@@ -67,20 +68,12 @@ public sealed class MessageCleanupService(
             await using var lease = await locks.TryAcquireAsync("message-cleanup", TimeSpan.FromMinutes(5));
             if (lease is null) return;
 
-            // Kreiramo novi scope za svaki poziv (jer je DbContext scoped)
+            // Kreiramo novi scope za svaki poziv (jer je DbContext scoped).
+            // Poruke I slike (baza + disk) — vidi PorukeCiscenje.
             await using var scope = scopeFactory.CreateAsyncScope();
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var ishod = await scope.ServiceProvider.GetRequiredService<PorukeCiscenje>().PocistiAsync(ct: ct);
 
-            // ExecuteDeleteAsync = direktan SQL DELETE bez učitavanja entiteta u memoriju
-            var deleted = await db.Messages
-                .Where(m => m.SentAt < cutoff)
-                .ExecuteDeleteAsync(ct);
-
-            if (deleted > 0)
-                logger.LogInformation(
-                    "Obrisano {Count} poruka starijih od {Days} dana (pre {Cutoff:yyyy-MM-dd})",
-                    deleted, retentionDays, cutoff);
-            else
+            if (ishod.Poruka == 0 && ishod.Slika == 0)
                 logger.LogDebug("Nema poruka za brisanje (starijih od {Cutoff:yyyy-MM-dd})", cutoff);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

@@ -427,3 +427,7 @@ wwwroot/uploads/**
 !wwwroot/uploads/
 !wwwroot/uploads/*/
 !wwwroot/uploads/**/.gitkeep
+
+# Slike iz četa (šifrovane) — pri `dotnet run` ChatMedia:Path je ContentRoot/chat-media.
+# U kontejneru su na volumenu /app/chat-media i nikad ne idu u repo.
+chat-media/

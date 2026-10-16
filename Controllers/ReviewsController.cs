@@ -12,9 +12,9 @@ public sealed class ReviewsController(ReviewService reviewService) : ControllerB
 {
     // ── POST /api/reviews ─────────────────────────────────────────────────
     /// <summary>
-    /// Klijent piše recenziju za listing.
-    /// Opciono može vezati recenziju za završen booking (BookingRequestId).
-    /// Jedan korisnik = jedna recenzija po listingu.
+    /// Strana u izvršenoj usluzi (BookingRequestId) ili poslu (JobId) ocenjuje
+    /// drugu stranu. Ocena je skrivena dok i druga strana ne oceni ili ne
+    /// prođe rok od 14 dana.
     /// </summary>
     [Authorize]
     [HttpPost("reviews")]
@@ -30,6 +30,40 @@ public sealed class ReviewsController(ReviewService reviewService) : ControllerB
 
         return StatusCode(StatusCodes.Status201Created,
             new { success = true, data = review });
+    }
+
+    // ── GET /api/reviews/pending ──────────────────────────────────────────
+    /// <summary>
+    /// Izvršene usluge i poslovi u roku koje korisnik još nije ocenio — obe
+    /// uloge (klijent i uslugodavac, autor i izvršilac).
+    /// </summary>
+    [Authorize]
+    [HttpGet("reviews/pending")]
+    public async Task<IActionResult> Pending()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var list   = await reviewService.PendingAsync(userId);
+        return Ok(new { success = true, data = list, total = list.Count });
+    }
+
+    // ── GET /api/users/{id}/client-reviews ────────────────────────────────
+    /// <summary>
+    /// Ocene korisnika kao naručioca, sa prosekom. Traži prijavu — korisnik
+    /// bez naloga uslugodavca nema javni profil.
+    /// </summary>
+    [Authorize]
+    [HttpGet("users/{id}/client-reviews")]
+    public async Task<IActionResult> GetClientReviews(
+        string id,
+        [FromQuery] int page     = 1,
+        [FromQuery] int pageSize = 20)
+    {
+        var dto = await reviewService.GetClientReviewsAsync(
+            id, page, pageSize, User.FindFirstValue(ClaimTypes.NameIdentifier));
+
+        return dto is null
+            ? NotFound(new { success = false, message = "Korisnik nije pronađen." })
+            : Ok(new { success = true, data = dto });
     }
 
     // ── GET /api/listings/{id}/reviews ────────────────────────────────────

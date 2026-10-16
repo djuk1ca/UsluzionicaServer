@@ -28,6 +28,10 @@ public sealed class BookingDto
     public string  ClientName     { get; set; } = string.Empty;
     public string? ClientImageUrl { get; set; }
 
+    /// <summary>Ocena klijenta kao naručioca — uslugodavac je vidi pre nego što prihvati.</summary>
+    public decimal ClientRating      { get; set; }
+    public int     ClientReviewCount { get; set; }
+
     public string  ProviderUserId { get; set; } = string.Empty;
     public string  ProviderName   { get; set; } = string.Empty;
 

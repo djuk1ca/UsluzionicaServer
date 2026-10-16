@@ -9,7 +9,9 @@ namespace UsluzionicaServer.Controllers;
 [ApiController]
 [Route("api/bookings")]
 [Authorize]
-public sealed class BookingsController(BookingService bookingService) : ControllerBase
+public sealed class BookingsController(
+    BookingService bookingService,
+    ReviewService  reviewService) : ControllerBase
 {
     // ── POST /api/bookings ────────────────────────────────────────────────
     /// <summary>
@@ -75,7 +77,12 @@ public sealed class BookingsController(BookingService bookingService) : Controll
     public async Task<IActionResult> GetPendingReview()
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var list   = await bookingService.GetPendingReviewsAsync(userId);
+        // Samo usluge koje je korisnik koristio kao klijent — ovaj endpoint
+        // zovu i starije verzije aplikacije, koje ne znaju za ocenu klijenta
+        // ni za poslove. Nove zovu /api/reviews/pending.
+        var list   = (await reviewService.PendingAsync(userId))
+            .Where(p => p.Kind == "Booking" && p.SubjectRole == "Provider")
+            .ToList();
         return Ok(new { success = true, data = list, total = list.Count });
     }
 

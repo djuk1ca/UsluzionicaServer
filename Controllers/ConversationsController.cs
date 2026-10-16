@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using UsluzionicaServer.DTOs.Conversations;
 using UsluzionicaServer.Services;
 
@@ -9,7 +10,9 @@ namespace UsluzionicaServer.Controllers;
 [ApiController]
 [Route("api/conversations")]
 [Authorize]
-public sealed class ConversationsController(ConversationService conversationService) : ControllerBase
+public sealed class ConversationsController(
+    ConversationService conversationService,
+    ChatImageService    chatImages) : ControllerBase
 {
     // ── GET /api/conversations ────────────────────────────────────────────
     /// <summary>
@@ -108,6 +111,29 @@ public sealed class ConversationsController(ConversationService conversationServ
 
         return StatusCode(StatusCodes.Status201Created,
             new { success = true, data = message });
+    }
+
+    // ── POST /api/conversations/{id}/images ───────────────────────────────
+    /// <summary>
+    /// Slika u četu (multipart: file, caption?). Jedan zahtev pravi i fajl i
+    /// poruku, pa nema otpremljenih fajlova bez poruke. Ide REST-om, ne kroz
+    /// SignalR (granica poruke 32 KB) — server sam razglašava ReceiveMessage.
+    /// Rate limit „chat-images".
+    /// </summary>
+    [HttpPost("{id:int}/images")]
+    [EnableRateLimiting("chat-images")]
+    [ProducesResponseType(typeof(MessageDto), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SendImage(int id, IFormFile file, [FromForm] string? caption, CancellationToken ct)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var (poruka, greska, nijePronadjeno) = await chatImages.PosaljiAsync(id, userId, file, caption, ct);
+
+        if (nijePronadjeno) return NotFound(new { success = false, message = greska });
+        if (greska is not null) return BadRequest(new { success = false, message = greska });
+
+        return StatusCode(StatusCodes.Status201Created, new { success = true, data = poruka });
     }
 
     // ── PATCH /api/conversations/{id}/read ────────────────────────────────

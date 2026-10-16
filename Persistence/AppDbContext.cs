@@ -18,6 +18,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ListingImage>        ListingImages        => Set<ListingImage>();
     public DbSet<Conversation>        Conversations        => Set<Conversation>();
     public DbSet<Message>             Messages             => Set<Message>();
+    public DbSet<MessageAttachment>   MessageAttachments   => Set<MessageAttachment>();
     public DbSet<BookingRequest>      BookingRequests      => Set<BookingRequest>();
     public DbSet<ServiceExecution>    ServiceExecutions    => Set<ServiceExecution>();
     public DbSet<Review>              Reviews              => Set<Review>();
@@ -32,6 +33,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<UserBlock>           UserBlocks           => Set<UserBlock>();
     public DbSet<DeviceToken>         DeviceTokens         => Set<DeviceToken>();
     public DbSet<WaitlistBonus>       WaitlistBonuses      => Set<WaitlistBonus>();
+    public DbSet<Job>                 Jobs                 => Set<Job>();
+    public DbSet<JobImage>            JobImages            => Set<JobImage>();
+    public DbSet<JobApplication>      JobApplications      => Set<JobApplication>();
+    public DbSet<JobBoost>            JobBoosts            => Set<JobBoost>();
 
     // ── Održavanje indeksa za pretragu ─────────────────────────────────────
     // Presreće SVAKI upis i osvežava Search* kolone pre nego što odu u bazu.
@@ -113,6 +118,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         foreach (var entry in ChangeTracker.Entries<ApplicationUser>())
             if (entry.State is EntityState.Added or EntityState.Modified)
                 Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
+
+        foreach (var entry in ChangeTracker.Entries<Job>())
+            if (entry.State is EntityState.Added or EntityState.Modified)
+                Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
     }
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -124,6 +133,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(u => u.FullName).HasMaxLength(200).IsRequired();
             e.Property(u => u.TokenBalance).HasColumnType("decimal(18,2)").HasDefaultValue(0m);
+            e.Property(u => u.ClientRating).HasColumnType("decimal(3,2)").HasDefaultValue(0m);
+            e.Property(u => u.ClientReviewCount).HasDefaultValue(0);
             e.Property(u => u.ProfileImageUrl).HasMaxLength(500);
             e.Property(u => u.LastKnownCity).HasMaxLength(100);
             e.Property(u => u.ReferralCode).HasMaxLength(20);
@@ -551,11 +562,120 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<Message>(e =>
         {
             e.Property(m => m.Text).HasMaxLength(4000).IsRequired();
+            e.Property(m => m.Kind).HasConversion<string>().HasMaxLength(20)
+             .HasDefaultValue(MessageKind.Text);
             e.HasIndex(m => new { m.ConversationId, m.SentAt });
             e.HasOne(m => m.Conversation)
              .WithMany(c => c.Messages)
              .HasForeignKey(m => m.ConversationId)
              .OnDelete(DeleteBehavior.Cascade);
+
+            // NoAction, ne SetNull: SQL Server ne dozvoljava drugu kaskadnu
+            // putanju ka Messages (već postoji Conversation → Messages).
+            // JobCleanupService zato SAM postavlja null pre trajnog brisanja posla.
+            e.HasOne(m => m.JobApplication)
+             .WithMany()
+             .HasForeignKey(m => m.JobApplicationId)
+             .OnDelete(DeleteBehavior.NoAction);
+        });
+
+        // ── MessageAttachment ──────────────────────────────────────────────
+        builder.Entity<MessageAttachment>(e =>
+        {
+            e.Property(a => a.StoragePath).HasMaxLength(100).IsRequired();
+            e.HasIndex(a => a.MessageId).IsUnique();
+            // Kaskada: red priloga ide sa porukom. Fajl NE — njega briše
+            // MessageCleanupService PRE poruke (vidi tamo).
+            e.HasOne(a => a.Message)
+             .WithOne(m => m.Attachment)
+             .HasForeignKey<MessageAttachment>(a => a.MessageId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Job ────────────────────────────────────────────────────────────
+        builder.Entity<Job>(e =>
+        {
+            e.Property(j => j.Title).HasMaxLength(80).IsRequired();
+            e.Property(j => j.Description).HasMaxLength(2000).IsRequired();
+            e.Property(j => j.Location).HasMaxLength(200).IsRequired();
+            e.Property(j => j.PayAmount).HasColumnType("decimal(10,2)");
+            e.Property(j => j.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(j => j.ModerationState).HasConversion<string>().HasMaxLength(16);
+            e.Property(j => j.BoostScore).HasColumnType("decimal(8,2)");
+
+            // TimeSpan kao TIKOVI (bigint), ne podrazumevani SQL `time`: `time`
+            // ide samo do 24 h, a preostalo vreme posla je do 30 dana — upis bi
+            // pukao baš na prvom izboru izvršioca.
+            e.Property(j => j.RemainingOnAssign).HasConversion<long?>();
+            e.Property(j => j.BoostRemainingOnAssign).HasConversion<long?>();
+
+            // Isti indeks za pretragu kao Listing — vidi komentar tamo o
+            // varchar + IsUnicode(false).
+            e.Property(j => j.SearchTitle).HasMaxLength(700).IsUnicode(false).IsRequired();
+            e.Property(j => j.SearchLocation).HasMaxLength(420).IsUnicode(false).IsRequired();
+            e.Property(j => j.SearchBody).HasColumnType("varchar(max)").IsRequired();
+            e.Property(j => j.SearchVersion).IsRequired();
+
+            e.HasIndex(j => new { j.Status, j.IsBoosted, j.BoostScore, j.CreatedAt })
+             .IsDescending(false, true, true, true)
+             .IncludeProperties(j => new { j.SearchTitle, j.SearchLocation, j.CategoryId, j.ExpiresAt })
+             .HasDatabaseName("IX_Jobs_Search_Open");
+            e.HasIndex(j => new { j.SearchLocation, j.Status }).HasDatabaseName("IX_Jobs_SearchLocation");
+            e.HasIndex(j => new { j.AuthorId, j.Status });
+
+            // Restrict: posao ne nestaje kaskadom sa nalogom — brisanje naloga
+            // ga briše kroz JobService (obaveštava one koji su se javili).
+            e.HasOne(j => j.Author)
+             .WithMany()
+             .HasForeignKey(j => j.AuthorId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(j => j.Category)
+             .WithMany()
+             .HasForeignKey(j => j.CategoryId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<JobImage>(e =>
+        {
+            e.Property(i => i.ImageUrl).HasMaxLength(500).IsRequired();
+            e.HasOne(i => i.Job)
+             .WithMany(j => j.Images)
+             .HasForeignKey(i => i.JobId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<JobApplication>(e =>
+        {
+            e.Property(a => a.Message).HasMaxLength(500).IsRequired();
+            e.Property(a => a.OfferAmount).HasColumnType("decimal(10,2)");
+            e.Property(a => a.Status).HasConversion<string>().HasMaxLength(16);
+            e.Property(a => a.CancelReason).HasMaxLength(80);
+
+            // Jedno javljanje po uslugodavcu — ponovno javljanje menja isti red.
+            e.HasIndex(a => new { a.JobId, a.ProviderUserId }).IsUnique();
+            e.HasIndex(a => new { a.ProviderUserId, a.Status });
+
+            e.HasOne(a => a.Job)
+             .WithMany(j => j.Applications)
+             .HasForeignKey(a => a.JobId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(a => a.Provider)
+             .WithMany()
+             .HasForeignKey(a => a.ProviderUserId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<JobBoost>(e =>
+        {
+            e.Property(b => b.TokensSpent).HasColumnType("decimal(18,2)");
+            e.HasOne(b => b.Job)
+             .WithMany(j => j.Boosts)
+             .HasForeignKey(b => b.JobId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(b => b.User)
+             .WithMany()
+             .HasForeignKey(b => b.UserId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── BookingRequest ─────────────────────────────────────────────────
@@ -585,18 +705,45 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         builder.Entity<Review>(e =>
         {
             e.Property(r => r.Comment).HasMaxLength(2000);
-            e.HasIndex(r => new { r.ListingId, r.AuthorId }).IsUnique();
+            e.Property(r => r.ContextTitle).HasMaxLength(200).IsRequired();
+            e.Property(r => r.SubjectRole).HasConversion<string>().HasMaxLength(20);
+
+            // Jedna ocena po strani: uz uslugu (klijent i uslugodavac — dva
+            // reda po zahtevu) i uz posao (autor i izvršilac).
+            e.HasIndex(r => new { r.AuthorId, r.BookingRequestId })
+             .IsUnique()
+             .HasFilter("[BookingRequestId] IS NOT NULL");
+            e.HasIndex(r => new { r.AuthorId, r.JobId })
+             .IsUnique()
+             .HasFilter("[JobId] IS NOT NULL");
+
+            // Prosek i lista ocena jednog korisnika u jednoj ulozi.
+            e.HasIndex(r => new { r.SubjectUserId, r.SubjectRole, r.PublishedAt });
+            e.HasIndex(r => r.ListingId);
+            // Pozadinsko objavljivanje kad prođe rok.
+            e.HasIndex(r => r.RevealAt).HasFilter("[PublishedAt] IS NULL");
+
             e.HasOne(r => r.Listing)
              .WithMany(l => l.Reviews)
              .HasForeignKey(r => r.ListingId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasOne(r => r.BookingRequest)
-             .WithOne(b => b.Review)
-             .HasForeignKey<Review>(r => r.BookingRequestId)
+             .WithMany(b => b.Reviews)
+             .HasForeignKey(r => r.BookingRequestId)
              .OnDelete(DeleteBehavior.NoAction);
+            // Posao se trajno briše 14 dana posle izvršenja; ocena ostaje sa
+            // naslovom u ContextTitle.
+            e.HasOne(r => r.Job)
+             .WithMany()
+             .HasForeignKey(r => r.JobId)
+             .OnDelete(DeleteBehavior.SetNull);
             e.HasOne(r => r.Author)
              .WithMany(u => u.Reviews)
              .HasForeignKey(r => r.AuthorId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(r => r.Subject)
+             .WithMany()
+             .HasForeignKey(r => r.SubjectUserId)
              .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -733,7 +880,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.ToTable(t => t.HasCheckConstraint(
                 "CK_Report_JednaMeta",
                 "(CASE WHEN [ListingId] IS NULL THEN 0 ELSE 1 END) + " +
-                "(CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) = 1"));
+                "(CASE WHEN [ReportedUserId] IS NULL THEN 0 ELSE 1 END) + " +
+                "(CASE WHEN [JobId] IS NULL THEN 0 ELSE 1 END) = 1"));
 
             // Jedan korisnik ne može dvaput prijaviti istu metu DOK PRVA ČEKA.
             // Filtrirani indeks, a ne običan: posle rešavanja sme ponovo, jer se
@@ -744,6 +892,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 
             e.HasIndex(r => new { r.ReporterId, r.ReportedUserId })
              .HasFilter("[Status] = 'Pending' AND [ReportedUserId] IS NOT NULL")
+             .IsUnique();
+
+            e.HasIndex(r => new { r.ReporterId, r.JobId })
+             .HasFilter("[Status] = 'Pending' AND [JobId] IS NOT NULL")
              .IsUnique();
 
             // Red za admina: filtrira po Status, sortira po CreatedAt.
@@ -767,6 +919,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.HasOne(r => r.ReportedUser)
              .WithMany().HasForeignKey(r => r.ReportedUserId)
              .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(r => r.Job)
+             .WithMany().HasForeignKey(r => r.JobId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Izuzetak od Restrict-a: poruka se briše posle 14 dana, a
+            // Restrict bi zaključao to brisanje za svaku prijavljenu poruku.
+            e.HasOne(r => r.Message)
+             .WithMany().HasForeignKey(r => r.MessageId)
+             .OnDelete(DeleteBehavior.SetNull);
 
             e.HasOne(r => r.ResolvedBy)
              .WithMany().HasForeignKey(r => r.ResolvedById)
