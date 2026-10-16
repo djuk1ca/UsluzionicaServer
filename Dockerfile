@@ -1,4 +1,4 @@
-﻿# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1
 
 # ═════════════════════════════════════════════════════════════════════════════
 # FAZA 1 — BUILD
@@ -36,7 +36,7 @@ RUN dotnet publish UsluzionicaServer.csproj \
 # zove String.Normalize(FormD) koji bez ICU baca PlatformNotSupportedException.
 # Cela pretraga na srpskom bi pukla. Debian slika ima pun ICU.
 # ═════════════════════════════════════════════════════════════════════════════
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
 # Non-root korisnik ne sme da otvori port ispod 1024 — otud 8080, ne 80.
