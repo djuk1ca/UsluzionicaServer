@@ -29,6 +29,15 @@ public static class SearchIndexer
         listing.SearchVersion  = SearchNormalizer.Version;
     }
 
+    /// <summary>Posao — isti oblik indeksa kao oglas, ista pretraga.</summary>
+    public static void Apply(Job job)
+    {
+        job.SearchTitle    = Truncate(SearchNormalizer.Fold(job.Title),    TitleMax);
+        job.SearchLocation = Truncate(SearchNormalizer.Fold(job.Location), LocationMax);
+        job.SearchBody     = SearchNormalizer.Fold(job.Description);
+        job.SearchVersion  = SearchNormalizer.Version;
+    }
+
     public static void Apply(ApplicationUser user)
     {
         user.SearchName    = Truncate(SearchNormalizer.Fold(user.FullName), NameMax);

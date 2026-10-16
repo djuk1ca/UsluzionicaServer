@@ -7,6 +7,7 @@ using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Infrastructure.Apple;
 using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Persistence;
+using UsluzionicaServer.Services.Jobs;
 
 namespace UsluzionicaServer.Services;
 
@@ -17,6 +18,9 @@ public sealed class UserService(
     IConfiguration               config,
     ImageModerationGate          imageGate,
     AppleNalog                   appleNalog,
+    JobService                   jobs,
+    JobApplicationService        jobApplications,
+    ChatImageService             chatImages,
     ILogger<UserService>         logger)
 {
     // ── GET profil ─────────────────────────────────────────────────────────
@@ -177,6 +181,16 @@ public sealed class UserService(
         await db.Listings
             .Where(l => l.ProviderProfile.UserId == userId && l.Status != ListingStatus.Archived)
             .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, ListingStatus.Archived));
+
+        // 1a. Poslovi: autorovi se brišu kao „Obriši posao" (javljeni dobijaju
+        //     obaveštenje), javljanja se povlače, a dogovoren posao se vraća
+        //     autoru kao da je izvršilac odustao.
+        await jobs.ObrisiSveAutoroveAsync(userId);
+        await jobApplications.PovuciSveAsync(userId);
+
+        // 1b. Slike koje je poslao u četu — odmah, sa diska i iz baze. Tekst
+        //     poruka ostaje do isteka roka (pošiljalac je „Obrisan nalog").
+        await chatImages.ObrisiPoslateAsync(userId);
 
         // 2. Poništi sve sesije.
         await db.RefreshTokens

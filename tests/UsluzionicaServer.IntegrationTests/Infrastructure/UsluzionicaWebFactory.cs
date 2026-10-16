@@ -26,6 +26,10 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
     /// <summary>Provera slika kojom testovi upravljaju — vidi StubImageModerator.</summary>
     public StubImageModerator ImageModerator { get; } = new();
 
+    /// <summary>Koren šifrovanih slika iz četa za ovaj test run.</summary>
+    public string ChatMediaPath { get; } =
+        Path.Combine(Path.GetTempPath(), "usluzionica-chat-media-test", Guid.NewGuid().ToString("N"));
+
     /// <summary>Sign in with Apple kojim testovi upravljaju — vidi FakeAppleSignIn.</summary>
     public FakeAppleSignIn Apple { get; } = new();
 
@@ -71,12 +75,17 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
 
                 ["App:BaseUrl"]           = "https://test.usluzionica.rs",
 
+                // Slike iz četa u privremenu fasciklu — nikad u projekat.
+                ["ChatMedia:Path"]        = ChatMediaPath,
+
                 // Rate limiti se dižu vrlo visoko. Razlog: u WebApplicationFactory
                 // svi zahtevi dolaze sa iste (prazne) IP adrese, pa ceo test
                 // suite deli JEDNU kvotu i sam sebe obori u 429.
                 // Klasa koja testira sam limiter ih spušta preko WithRateLimits().
                 ["RateLimit:AuthPermitLimit"]   = "100000",
                 ["RateLimit:EmailPermitLimit"]  = "100000",
+                ["RateLimit:JobPermitLimit"]    = "100000",
+                ["RateLimit:ChatImagePermitLimit"] = "100000",
 
                 // Eksplicitno postavljeno jer se appsettings i kod razilaze:
                 // kod podrazumeva 3 dana, appsettings.json ima 0 (čime je

@@ -1,13 +1,15 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Moderation;
 using UsluzionicaServer.Persistence;
+using UsluzionicaServer.Services.Jobs;
 
 namespace UsluzionicaServer.Services;
 
 /// <summary>
-/// Prijave oglasa i korisnika, i njihovo rešavanje.
+/// Prijave oglasa, poslova i korisnika, i njihovo rešavanje.
 ///
 /// RED ZA ADMINA JE PO METI, NE PO PRIJAVI.
 /// Deset prijava istog oglasa je jedan posao i jedna odluka, ne deset. Zato je
@@ -28,6 +30,8 @@ public sealed class ReportService(
     AppDbContext           db,
     UserModerationService  userModeration,
     NotificationService    notifications,
+    JobService             jobs,
+    ChatImageService       chatImages,
     ILogger<ReportService> logger)
 {
     // ── PRIJAVA ────────────────────────────────────────────────────────────
@@ -37,14 +41,18 @@ public sealed class ReportService(
     {
         // Isto pravilo koje čuva i CHECK ograničenje u bazi, samo ranije i sa
         // razumljivom porukom. Bez ove provere korisnik bi dobio 500 iz SQL-a.
-        var imaOglas    = dto.ListingId is not null;
+        var imaOglas     = dto.ListingId is not null;
+        var imaPosao     = dto.JobId is not null;
         var imaKorisnika = !string.IsNullOrWhiteSpace(dto.ReportedUserId);
 
-        if (imaOglas == imaKorisnika)
+        if ((imaOglas ? 1 : 0) + (imaPosao ? 1 : 0) + (imaKorisnika ? 1 : 0) != 1)
             return (false, "Prijava mora imati tačno jednu metu.");
 
         if (dto.TargetType == ReportTargetType.Listing && !imaOglas)
             return (false, "Nedostaje oglas koji se prijavljuje.");
+
+        if (dto.TargetType == ReportTargetType.Job && !imaPosao)
+            return (false, "Nedostaje posao koji se prijavljuje.");
 
         if (dto.TargetType == ReportTargetType.User && !imaKorisnika)
             return (false, "Nedostaje korisnik koji se prijavljuje.");
@@ -64,6 +72,18 @@ public sealed class ReportService(
 
             vlasnikId = oglas.VlasnikId;
         }
+        else if (dto.TargetType == ReportTargetType.Job)
+        {
+            var autor = await db.Jobs
+                .Where(j => j.Id == dto.JobId && j.Status != JobStatus.Deleted)
+                .Select(j => j.AuthorId)
+                .FirstOrDefaultAsync();
+
+            if (autor is null)
+                return (false, "Posao nije pronađen.");
+
+            vlasnikId = autor;
+        }
         else
         {
             var postoji = await db.Users.AnyAsync(u => u.Id == dto.ReportedUserId);
@@ -76,12 +96,28 @@ public sealed class ReportService(
         if (vlasnikId == reporterId)
             return (false, "Ne možete prijaviti sopstveni sadržaj.");
 
+        // „Prijavi sliku" iz četa: poruka mora biti od prijavljenog, a
+        // prijavilac učesnik razgovora — inače bi se tuđa poruka zadržala.
+        if (dto.MessageId is int porukaId)
+        {
+            var poruka = await db.Messages.AsNoTracking()
+                .Where(m => m.Id == porukaId)
+                .Select(m => new { m.SenderId, m.Conversation.User1Id, m.Conversation.User2Id })
+                .FirstOrDefaultAsync();
+
+            if (dto.TargetType != ReportTargetType.User || poruka is null || poruka.SenderId != vlasnikId
+                || (poruka.User1Id != reporterId && poruka.User2Id != reporterId))
+                return (false, "Poruka nije pronađena.");
+        }
+
         db.Reports.Add(new Report
         {
             ReporterId     = reporterId,
             TargetType     = dto.TargetType,
             ListingId      = dto.TargetType == ReportTargetType.Listing ? dto.ListingId : null,
+            JobId          = dto.TargetType == ReportTargetType.Job     ? dto.JobId : null,
             ReportedUserId = dto.TargetType == ReportTargetType.User    ? dto.ReportedUserId : null,
+            MessageId      = dto.MessageId,
             Reason         = dto.Reason,
             Note           = string.IsNullOrWhiteSpace(dto.Note) ? null : dto.Note.Trim(),
             Status         = ReportStatus.Pending,
@@ -99,6 +135,10 @@ public sealed class ReportService(
             // uzastopnim prijavama sam podigao metu na vrh reda.
             return (false, "Već ste prijavili ovaj sadržaj. Prijava se razmatra.");
         }
+
+        // Slika iz prijavljene poruke ostaje adminu i posle roka od 14 dana.
+        if (dto.MessageId is int zadrzi)
+            await chatImages.ZadrziAsync(zadrzi);
 
         logger.LogInformation(
             "Nova prijava: {TargetType} od {ReporterId}, razlog {Reason}",
@@ -135,6 +175,19 @@ public sealed class ReportService(
                 Broj        = g.Count(),
                 Najstarija  = g.Min(r => r.CreatedAt),
                 Razlozi     = g.Select(r => r.Reason).Distinct().ToList()
+            })
+            .ToListAsync();
+
+        var poslovi = await db.Reports
+            .AsNoTracking()
+            .Where(r => r.Status == status && r.JobId != null)
+            .GroupBy(r => r.JobId!.Value)
+            .Select(g => new
+            {
+                JobId      = g.Key,
+                Broj       = g.Count(),
+                Najstarija = g.Min(r => r.CreatedAt),
+                Razlozi    = g.Select(r => r.Reason).Distinct().ToList()
             })
             .ToListAsync();
 
@@ -192,6 +245,45 @@ public sealed class ReportService(
             }
         }
 
+        if (poslovi.Count > 0)
+        {
+            var ids = poslovi.Select(p => p.JobId).ToList();
+
+            var podaci = await db.Jobs
+                .AsNoTracking()
+                .Where(j => ids.Contains(j.Id))
+                .Select(j => new
+                {
+                    j.Id,
+                    j.Title,
+                    j.Status,
+                    j.ModerationState,
+                    j.AuthorId,
+                    AutorIme = j.Author.FullName
+                })
+                .ToDictionaryAsync(x => x.Id);
+
+            foreach (var o in poslovi)
+            {
+                if (!podaci.TryGetValue(o.JobId, out var p))
+                    continue;
+
+                rezultat.Add(new ReportQueueItemDto
+                {
+                    TargetType        = ReportTargetType.Job,
+                    JobId             = o.JobId,
+                    TargetNaziv       = p.Title,
+                    VlasnikId         = p.AuthorId,
+                    VlasnikIme        = p.AutorIme,
+                    BrojPrijava       = o.Broj,
+                    NajstarijaPrijava = o.Najstarija,
+                    Razlozi           = [.. o.Razlozi.Select(r => r.ToString())],
+                    ModerationState   = p.ModerationState.ToString(),
+                    VecObradjeno      = p.Status == JobStatus.Deleted
+                });
+            }
+        }
+
         if (korisnici.Count > 0)
         {
             var ids = korisnici.Select(k => k.UserId).ToList();
@@ -229,12 +321,10 @@ public sealed class ReportService(
 
     /// <summary>Pojedinačne prijave za jednu metu — kad admin razvije stavku.</summary>
     public async Task<List<ReportDetailDto>> DetaljiAsync(
-        ReportTargetType targetType, int? listingId, string? reportedUserId)
+        ReportTargetType targetType, int? listingId, string? reportedUserId, int? jobId = null)
         => await db.Reports
             .AsNoTracking()
-            .Where(r => targetType == ReportTargetType.Listing
-                        ? r.ListingId == listingId
-                        : r.ReportedUserId == reportedUserId)
+            .Where(Meta(targetType, listingId, jobId, reportedUserId))
             .OrderByDescending(r => r.CreatedAt)
             .Select(r => new ReportDetailDto
             {
@@ -245,7 +335,8 @@ public sealed class ReportService(
                 Status      = r.Status.ToString(),
                 CreatedAt   = r.CreatedAt,
                 ResolvedBy  = r.ResolvedBy != null ? r.ResolvedBy.FullName : null,
-                ResolvedAt  = r.ResolvedAt
+                ResolvedAt  = r.ResolvedAt,
+                MessageId   = r.MessageId
             })
             .ToListAsync();
 
@@ -262,17 +353,22 @@ public sealed class ReportService(
         string adminId, ResolveReportDto dto)
     {
         var jeOglas = dto.TargetType == ReportTargetType.Listing;
+        var jePosao = dto.TargetType == ReportTargetType.Job;
 
         if (jeOglas && dto.ListingId is null)
             return (false, "Nedostaje oglas.");
 
-        if (!jeOglas && string.IsNullOrWhiteSpace(dto.ReportedUserId))
+        if (jePosao && dto.JobId is null)
+            return (false, "Nedostaje posao.");
+
+        if (!jeOglas && !jePosao && string.IsNullOrWhiteSpace(dto.ReportedUserId))
             return (false, "Nedostaje korisnik.");
 
-        var imaPrijava = await db.Reports.AnyAsync(r =>
-            r.Status == ReportStatus.Pending &&
-            (jeOglas ? r.ListingId == dto.ListingId
-                     : r.ReportedUserId == dto.ReportedUserId));
+        var meta = Meta(dto.TargetType, dto.ListingId, dto.JobId, dto.ReportedUserId);
+
+        var imaPrijava = await db.Reports
+            .Where(r => r.Status == ReportStatus.Pending)
+            .AnyAsync(meta);
 
         if (!imaPrijava)
             return (false, "Nema nerešenih prijava za ovu metu.");
@@ -314,6 +410,43 @@ public sealed class ReportService(
                 break;
             }
 
+            case ReportAction.UkloniPosao:
+            {
+                if (!jePosao)
+                    return (false, "Uklanjanje posla je moguće samo na prijavi posla.");
+
+                var posao = await db.Jobs
+                    .Where(j => j.Id == dto.JobId)
+                    .Select(j => new { j.Id, j.Title, j.AuthorId, j.Status })
+                    .FirstOrDefaultAsync();
+
+                if (posao is null)
+                    return (false, "Posao nije pronađen.");
+
+                // Oznaka pre brisanja; red ostaje kao trag (prijavljen posao
+                // se ne briše trajno — vidi JobService.TrajnoObrisiAsync).
+                await db.Jobs
+                    .Where(j => j.Id == dto.JobId)
+                    .ExecuteUpdateAsync(s => s
+                        .SetProperty(j => j.ModerationState, ModerationState.Removed));
+
+                if (posao.Status is not (JobStatus.Deleted or JobStatus.Completed))
+                    await jobs.DeleteAsync(posao.Id, posao.AuthorId);
+
+                await notifications.SendAsync(
+                    posao.AuthorId,
+                    NotificationKind.JobRemoved,
+                    "Posao je uklonjen",
+                    $"Posao „{posao.Title}\" je uklonjen jer krši uslove korišćenja." +
+                    (string.IsNullOrWhiteSpace(dto.Note) ? "" : $" Razlog: {dto.Note}"),
+                    posao.Id);
+
+                logger.LogWarning(
+                    "Admin {AdminId} uklonio posao {JobId} po prijavi",
+                    adminId, dto.JobId);
+                break;
+            }
+
             case ReportAction.DeaktivirajNalog:
             {
                 // Vlasnik se traži iz mete, a ne prima iz zahteva: klijent ne
@@ -330,6 +463,18 @@ public sealed class ReportService(
 
                     if (v is null)
                         return (false, "Oglas nije pronađen.");
+
+                    vlasnikId = v;
+                }
+                else if (jePosao)
+                {
+                    var v = await db.Jobs
+                        .Where(j => j.Id == dto.JobId)
+                        .Select(j => j.AuthorId)
+                        .FirstOrDefaultAsync();
+
+                    if (v is null)
+                        return (false, "Posao nije pronađen.");
 
                     vlasnikId = v;
                 }
@@ -360,6 +505,13 @@ public sealed class ReportService(
                         .ExecuteUpdateAsync(s => s
                             .SetProperty(l => l.ModerationState, ModerationState.Cleared));
                 }
+                else if (jePosao)
+                {
+                    await db.Jobs
+                        .Where(j => j.Id == dto.JobId)
+                        .ExecuteUpdateAsync(s => s
+                            .SetProperty(j => j.ModerationState, ModerationState.Cleared));
+                }
 
                 logger.LogInformation(
                     "Admin {AdminId} odbio prijave za {TargetType}",
@@ -378,18 +530,35 @@ public sealed class ReportService(
 
         var sada = DateTime.UtcNow;
 
+        // Odluka je doneta — zadržane slike iz prijavljenih poruka više ne
+        // trebaju; sledeće noći odlaze sa porukom ako je rok prošao.
+        var poruke = await db.Reports
+            .Where(r => r.Status == ReportStatus.Pending && r.MessageId != null)
+            .Where(meta)
+            .Select(r => r.MessageId!.Value)
+            .ToListAsync();
+
         await db.Reports
-            .Where(r => r.Status == ReportStatus.Pending &&
-                        (jeOglas ? r.ListingId == dto.ListingId
-                                 : r.ReportedUserId == dto.ReportedUserId))
+            .Where(r => r.Status == ReportStatus.Pending)
+            .Where(meta)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(r => r.Status,         noviStatus)
                 .SetProperty(r => r.ResolvedAt,     sada)
                 .SetProperty(r => r.ResolvedById,   adminId)
                 .SetProperty(r => r.ResolutionNote, dto.Note));
 
+        await chatImages.OslobodiAsync(poruke);
         return (true, null);
     }
+
+    /// <summary>Prijave za jednu metu — oglas, posao ili korisnik.</summary>
+    private static Expression<Func<Report, bool>> Meta(
+        ReportTargetType tip, int? listingId, int? jobId, string? userId) => tip switch
+    {
+        ReportTargetType.Listing => r => r.ListingId == listingId,
+        ReportTargetType.Job     => r => r.JobId == jobId,
+        _                        => r => r.ReportedUserId == userId
+    };
 
     /// <summary>Broj nerešenih prijava — za značku na tabu u admin panelu.</summary>
     public async Task<int> BrojNeresenihAsync()

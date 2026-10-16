@@ -323,7 +323,6 @@ public sealed class ProviderService(
         var reviews = await db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
-            .Include(r => r.Listing)
             .Where(r => EF.Property<int?>(r, "ProviderProfileId") == providerProfileId)
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -337,7 +336,7 @@ public sealed class ProviderService(
             AuthorImageUrl = r.Author.ProfileImageUrl,
             Stars          = r.Stars,
             Comment        = r.Comment,
-            ListingTitle   = r.Listing.Title,
+            ListingTitle   = r.ContextTitle,
             CreatedAt      = r.CreatedAt
         }).ToList();
     }

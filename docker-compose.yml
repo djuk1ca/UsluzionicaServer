@@ -84,6 +84,10 @@ services:
       # Bez ove vrednosti aplikacija radi, ali bez keša, backplane-a i
       # deljenih Data Protection ključeva — vidi docs/scaling.md.
       Redis__Connection: "cache:6379"
+
+      # Slike iz četa — šifrovane, VAN wwwroot-a, brišu se posle 14 dana
+      # (vidi Infrastructure/ChatMedia/ChatMediaStore.cs).
+      ChatMedia__Path: /app/chat-media
     ports:
       - "8080:8080"
     healthcheck:
@@ -103,9 +107,13 @@ services:
       # vlasništvo od foldera u slici (koji smo chown-ovali), dok bind mount
       # nameće vlasništvo sa hosta i upload puca sa "Permission denied".
       - uploads:/app/wwwroot/uploads
+      # Zaseban volumen, NE u backup-u (deploy/backup.sh): obećanje „slike u
+      # četu se brišu posle 14 dana i na serveru" je tako doslovno tačno.
+      - chat-media:/app/chat-media
     restart: unless-stopped
 
 volumes:
   mssql-data:
   redis-data:
   uploads:
+  chat-media:

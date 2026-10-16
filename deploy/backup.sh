@@ -80,6 +80,11 @@ log "Baza: $(du -h "$BACKUP_DIR/baza_$datum.bak.gz" | cut -f1)"
 
 # ── 2. Slike ────────────────────────────────────────────────────────────────
 # Volumen se montira samo za čitanje u privremeni kontejner; API radi dalje.
+#
+# Samo slike oglasa, profila i poslova. Volumen chat-media (slike iz četa)
+# NAMERNO nije ovde: brišu se posle 14 dana „i na serveru", a kopija u
+# backup-u bi to obećanje produžila. Posle vraćanja baze poruke iz poslednjih
+# 14 dana imaju „Slika više nije dostupna".
 log "Slike: volumen $UPLOADS_VOLUME"
 docker run --rm \
   -v "$UPLOADS_VOLUME":/data:ro \

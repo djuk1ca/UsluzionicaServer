@@ -13,7 +13,7 @@ public sealed class ConversationService(
     UserManager<ApplicationUser> userManager,
     MessageEncryption            encryption,
     OnlineTracker                tracker,
-    NotificationService          notificationService,
+    ChatSender                   chatSender,
     BlockService                 blockService,
     ILogger<ConversationService> logger)
 {
@@ -29,6 +29,8 @@ public sealed class ConversationService(
             .Include(c => c.User1)
             .Include(c => c.User2)
             .Include(c => c.Messages.OrderByDescending(m => m.SentAt).Take(1))
+                .ThenInclude(m => m.JobApplication)
+                    .ThenInclude(a => a!.Job)
             .Where(c => c.User1Id == userId || c.User2Id == userId)
             .OrderByDescending(c => c.LastMessageAt ?? c.CreatedAt)
             .ToListAsync();
@@ -65,8 +67,8 @@ public sealed class ConversationService(
             .ToList();
         var profili = await db.ProviderProfiles.AsNoTracking()
             .Where(p => sagovornici.Contains(p.UserId))
-            .Select(p => new { p.UserId, p.Id })
-            .ToDictionaryAsync(p => p.UserId, p => p.Id);
+            .Select(p => new { p.UserId, p.Id, p.AverageRating, p.TotalReviews })
+            .ToDictionaryAsync(p => p.UserId);
 
         var result = new List<ConversationDto>();
 
@@ -80,10 +82,12 @@ public sealed class ConversationService(
             var lastMsg = c.Messages.FirstOrDefault();
             if (lastMsg is not null)
             {
+                // Ista funkcija pregleda kao obaveštenje i push — seče po
+                // grafemima (emoji ostaje ceo), a kartica javljanja ima svoj tekst.
                 var decrypted = encryption.SafeDecrypt(lastMsg.Text, c.Id);
-                preview = decrypted.Length > 80
-                    ? decrypted[..80] + "…"
-                    : decrypted;
+                preview = lastMsg.Kind == MessageKind.Text
+                    ? Pregled.Skrati(decrypted, 80)
+                    : ChatSender.PregledPoruke(lastMsg.Kind, decrypted, lastMsg.JobApplication?.Job?.Title);
             }
 
             // Broj nepročitanih poruka KOJE JE DRUGI KORISNIK POSLAO (a meni nisu pročitane)
@@ -100,7 +104,12 @@ public sealed class ConversationService(
                 OtherUserName     = other.FullName,
                 OtherUserImageUrl = other.ProfileImageUrl,
                 OtherUserIsOnline = onlineIds.Contains(other.Id),
-                OtherProviderProfileId = profili.TryGetValue(other.Id, out var profilId) ? profilId : null,
+                OtherProviderProfileId = profili.TryGetValue(other.Id, out var profil) ? profil.Id : null,
+                // Ocena ispod imena u četu: uslugodavac kao uslugodavac,
+                // ostali kao naručilac (plan v2 §4 — „u četu, ispod imena").
+                OtherRating      = profil?.AverageRating ?? other.ClientRating,
+                OtherRatingCount = profil?.TotalReviews  ?? other.ClientReviewCount,
+                OtherRatingRole  = profil is not null ? "Provider" : "Client",
                 LastMessagePreview = preview,
                 LastMessageAt      = c.LastMessageAt,
                 UnreadCount        = unread,
@@ -286,26 +295,32 @@ public sealed class ConversationService(
         pageSize = Math.Clamp(pageSize, 1, 100);
         page     = Math.Max(page, 1);
 
+        // Strana 1 = NAJNOVIJIH pageSize poruka, strana 2 = prethodnih… — kako
+        // ih aplikacija i traži („Učitaj starije" dodaje na vrh). Ranije je
+        // ovde stajao rastući redosled pre Skip/Take, pa je strana 1 bila
+        // NAJSTARIJIH 50: razgovor sa više od 50 poruka nije prikazivao
+        // poslednje. Unutar strane se vraća hronološki.
         var messages = await db.Messages
             .AsNoTracking()
             .Include(m => m.Sender)
+            .Include(m => m.Attachment)
+            .Include(m => m.JobApplication)
+                .ThenInclude(a => a!.Job)
+                    .ThenInclude(j => j.Author)
             .Where(m => m.ConversationId == conversationId)
-            .OrderBy(m => m.SentAt)  // najstarije prve (hronološki chat)
+            .OrderByDescending(m => m.SentAt)
+            .ThenByDescending(m => m.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
 
-        return (messages.Select(m => new MessageDto
-        {
-            Id             = m.Id,
-            ConversationId = m.ConversationId,
-            SenderId       = m.SenderId,
-            SenderName     = m.Sender.FullName,
-            SenderImageUrl = m.Sender.ProfileImageUrl,
-            Text           = encryption.SafeDecrypt(m.Text, m.ConversationId), // dekriptovano
-            SentAt         = m.SentAt,
-            IsRead         = m.IsRead
-        }).ToList(), null);
+        messages.Reverse();
+
+        return (messages
+            .Select(m => ChatSender.Mapiraj(
+                m, m.Sender, encryption.SafeDecrypt(m.Text, m.ConversationId), m.JobApplication,
+                chatSender.Slika(m.Attachment, userId)))
+            .ToList(), null);
     }
 
     // ── SLANJE PORUKE (REST fallback) ──────────────────────────────────────
@@ -343,41 +358,10 @@ public sealed class ConversationService(
         var sender = await userManager.FindByIdAsync(senderId);
         if (sender is null) return (null, "Korisnik nije pronađen.");
 
-        var encrypted = encryption.Encrypt(text.Trim(), conversationId);
-
-        var message = new Message
-        {
-            ConversationId = conversationId,
-            SenderId       = senderId,
-            Text           = encrypted,
-            SentAt         = DateTime.UtcNow,
-            IsRead         = false
-        };
-
-        db.Messages.Add(message);
-        conv.LastMessageAt = message.SentAt;
-
-        var receiverId = conv.User1Id == senderId ? conv.User2Id : conv.User1Id;
-        await db.SaveChangesAsync();
-
-        await notificationService.SendAsync(
-            receiverId,
-            NotificationKind.NewMessage,
-            $"Nova poruka od {sender.FullName}",
-            text.Length > 60 ? text[..60] + "…" : text,
-            conversationId);
-
-        return (new MessageDto
-        {
-            Id             = message.Id,
-            ConversationId = conversationId,
-            SenderId       = senderId,
-            SenderName     = sender.FullName,
-            SenderImageUrl = sender.ProfileImageUrl,
-            Text           = text, // originalni, nešifrovani tekst
-            SentAt         = message.SentAt,
-            IsRead         = false
-        }, null);
+        // Isto kao hub: upis, obaveštenje i SignalR. Ranije REST rezerva nije
+        // razglašavala poruku, pa je sagovornik sa otvorenim četom nije video
+        // dok ne osveži ekran.
+        return (await chatSender.PosaljiAsync(conv, sender, text), null);
     }
 
     // ── OZNAČI KAO PROČITANO ───────────────────────────────────────────────

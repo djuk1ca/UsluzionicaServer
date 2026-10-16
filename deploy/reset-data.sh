@@ -24,6 +24,7 @@ set -euo pipefail
 DIR=/opt/usluzionica
 DB_NAME=UsluzionicaDB
 UPLOADS_VOLUME=usluzionica_uploads
+CHAT_MEDIA_VOLUME=usluzionica_chat-media
 LOGS_VOLUME=usluzionica_logs
 
 cd "$DIR"
@@ -72,8 +73,9 @@ sql "ALTER DATABASE [$DB_NAME] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DAT
 # ── 4. Slike i logovi ───────────────────────────────────────────────────────
 # Sadržaj volumena, ne sam volumen: compose ga ne mora ponovo praviti, a
 # montiranja u kontejnerima ostaju ista.
-log "Brišem slike ($UPLOADS_VOLUME) i logove ($LOGS_VOLUME)"
+log "Brišem slike ($UPLOADS_VOLUME, $CHAT_MEDIA_VOLUME) i logove ($LOGS_VOLUME)"
 docker run --rm -v "$UPLOADS_VOLUME":/data alpine:3 find /data -mindepth 1 -delete
+docker run --rm -v "$CHAT_MEDIA_VOLUME":/data alpine:3 find /data -mindepth 1 -delete
 docker run --rm -v "$LOGS_VOLUME":/data alpine:3 find /data -mindepth 1 -delete
 
 # ── 5. Keš ──────────────────────────────────────────────────────────────────

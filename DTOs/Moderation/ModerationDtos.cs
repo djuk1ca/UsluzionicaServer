@@ -19,7 +19,7 @@ public sealed class BlockedUserDto
 /// <summary>
 /// Telo zahteva za prijavu.
 ///
-/// Meta se šalje kao jedno od dva polja, isto kao što je i u bazi. Validacija
+/// Meta se šalje kao jedno od tri polja, isto kao što je i u bazi. Validacija
 /// da je popunjeno tačno jedno radi se u servisu, jer DataAnnotations ne ume
 /// da izrazi „tačno jedno od".
 /// </summary>
@@ -29,7 +29,14 @@ public sealed class CreateReportDto
     public ReportTargetType TargetType { get; set; }
 
     public int?    ListingId      { get; set; }
+    public int?    JobId          { get; set; }
     public string? ReportedUserId { get; set; }
+
+    /// <summary>
+    /// „Prijavi sliku" iz četa: prijavljuje se pošiljalac (ReportedUserId), a
+    /// poruka je kontekst — slika se zadržava adminu do 30 dana.
+    /// </summary>
+    public int?    MessageId      { get; set; }
 
     [Required]
     public ReportReason Reason { get; set; }
@@ -50,6 +57,8 @@ public sealed class ReportQueueItemDto
 
     /// <summary>Popunjeno kad je meta oglas.</summary>
     public int?    ListingId       { get; set; }
+    /// <summary>Popunjeno kad je meta posao.</summary>
+    public int?    JobId           { get; set; }
     /// <summary>Popunjeno kad je meta korisnik.</summary>
     public string? ReportedUserId  { get; set; }
 
@@ -87,6 +96,9 @@ public sealed class ReportDetailDto
     public DateTime CreatedAt    { get; set; }
     public string?  ResolvedBy   { get; set; }
     public DateTime? ResolvedAt  { get; set; }
+
+    /// <summary>Poruka iz četa uz prijavu — admin otvara sliku preko /api/admin/messages/{id}/image.</summary>
+    public int?     MessageId    { get; set; }
 }
 
 /// <summary>Šta admin radi sa prijavljenom metom.</summary>
@@ -99,7 +111,10 @@ public enum ReportAction
     DeaktivirajNalog,
 
     /// <summary>Nema prekršaja. Prijave se zatvaraju, sadržaj ostaje.</summary>
-    Odbij
+    Odbij,
+
+    /// <summary>Prijava posla je osnovana — posao se briše kao „Obriši posao", uz obaveštenje autoru.</summary>
+    UkloniPosao
 }
 
 public sealed class ResolveReportDto
@@ -108,6 +123,7 @@ public sealed class ResolveReportDto
     public ReportTargetType TargetType { get; set; }
 
     public int?    ListingId      { get; set; }
+    public int?    JobId          { get; set; }
     public string? ReportedUserId { get; set; }
 
     [Required]
