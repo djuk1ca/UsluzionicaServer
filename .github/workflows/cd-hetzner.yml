@@ -92,7 +92,7 @@ jobs:
             type=raw,value=${{ steps.tag.outputs.tag }}
 
       - name: Postavi Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build i push
         uses: docker/build-push-action@v6
