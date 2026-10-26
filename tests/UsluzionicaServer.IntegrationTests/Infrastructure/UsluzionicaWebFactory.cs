@@ -86,6 +86,7 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 ["RateLimit:EmailPermitLimit"]  = "100000",
                 ["RateLimit:JobPermitLimit"]    = "100000",
                 ["RateLimit:ChatImagePermitLimit"] = "100000",
+                ["RateLimit:PublicPermitLimit"]    = "100000",
 
                 // Eksplicitno postavljeno jer se appsettings i kod razilaze:
                 // kod podrazumeva 3 dana, appsettings.json ima 0 (čime je

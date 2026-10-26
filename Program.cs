@@ -519,6 +519,7 @@ var reportPermitLimit = builder.Configuration.GetValue("RateLimit:ReportPermitLi
 var reportWindowHours = builder.Configuration.GetValue("RateLimit:ReportWindowHours",  24);
 var jobPermitLimit    = builder.Configuration.GetValue("RateLimit:JobPermitLimit",    10);
 var chatImagePermitLimit = builder.Configuration.GetValue("RateLimit:ChatImagePermitLimit", 20);
+var publicPermitLimit = builder.Configuration.GetValue("RateLimit:PublicPermitLimit", 300);
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -614,6 +615,22 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = jobPermitLimit,
                 Window      = TimeSpan.FromHours(24),
+                QueueLimit  = 0
+            }));
+
+    // Javni katalog bez naloga (/api/public/*) — po IP-u, jer korisnika nema.
+    //
+    // Široko namerno: sajt zove API sa servera, pa svi gosti čiji zahtev nije
+    // pogodio keš sajta mogu da stignu sa JEDNE adrese (kontejner sajta), osim
+    // ako sajt prosledi X-Forwarded-For. Granica je tu da skripta ne iscrpi
+    // bazu pretragom u krug, ne da broji obične posetioce.
+    options.AddPolicy("public", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = publicPermitLimit,
+                Window      = TimeSpan.FromMinutes(1),
                 QueueLimit  = 0
             }));
 
