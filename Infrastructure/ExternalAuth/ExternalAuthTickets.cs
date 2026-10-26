@@ -46,7 +46,10 @@ public sealed class ExternalAuthTickets(IDataProtectionProvider dataProtection)
         dataProtection.CreateProtector("ExternalAuth.Signup.v1").ToTimeLimitedDataProtector();
 
     /// <summary>Šta putuje kroz provajdera kao <c>state</c>.</summary>
-    public sealed record StateData(string Provider, string Challenge, string? ReferralCode);
+    /// <param name="Client">Ko je prijavu započeo: <c>"web"</c> (sajt) ili null
+    /// (aplikacija). Opciono, da se state izdat pre ovog polja i dalje čita — tada
+    /// je null, pa povratak ide u aplikaciju kao do sada.</param>
+    public sealed record StateData(string Provider, string Challenge, string? ReferralCode, string? Client = null);
 
     /// <summary>
     /// Šta aplikacija dobija posle povratka: ili već poznat nalog (<see cref="UserId"/>),

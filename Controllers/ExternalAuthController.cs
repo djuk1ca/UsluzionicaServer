@@ -28,6 +28,11 @@ namespace UsluzionicaServer.Controllers;
 ///
 /// Tokeni NIKAD ne putuju kroz adresu. Povratna adresa nosi samo kratkoživeći
 /// kod koji bez PKCE tajne ne vredi ništa.
+///
+/// SAJT ide istim tokom, sa <c>client=web</c> na startu: povratak je tada
+/// <c>{App:SiteUrl}/app/oauth/povratak#code=…</c>, a razmenu sajt radi sa svog
+/// servera, istom PKCE tajnom. Klijent putuje u potpisanom state-u, pa ga
+/// provajder ni napadač ne mogu promeniti.
 /// </summary>
 [ApiController]
 [Route("api/auth")]
@@ -45,6 +50,15 @@ public sealed class ExternalAuthController(
     /// <summary>Kuda se aplikacija vraća. Mora se poklapati sa IntentFilter-om na Androidu.</summary>
     private string AppCallback =>
         config["ExternalAuth:CallbackUri"] is { Length: > 0 } uri ? uri : "usluzionica://auth";
+
+    /// <summary>Kuda se vraća sajt. Podrazumevano strana sajta koja čita fragment.</summary>
+    private string WebCallback =>
+        config["ExternalAuth:WebCallbackUri"] is { Length: > 0 } uri
+            ? uri
+            : $"{(config["App:SiteUrl"] is { Length: > 0 } sajt ? sajt : "https://usluzionica.rs").TrimEnd('/')}/app/oauth/povratak";
+
+    /// <summary>Jedina vrednost <c>client</c> koja menja povratak; sve ostalo ide u aplikaciju.</summary>
+    private const string WebKlijent = "web";
 
     // ── GET /api/auth/providers ────────────────────────────────────────────
     /// <summary>
@@ -69,18 +83,21 @@ public sealed class ExternalAuthController(
     public IActionResult Start(
         string provider,
         [FromQuery] string? challenge,
-        [FromQuery(Name = "ref")] string? referralCode)
+        [FromQuery(Name = "ref")] string? referralCode,
+        [FromQuery] string? client)
     {
+        var klijent = NormalizujKlijenta(client);
+
         var p = Nadji(provider);
         if (p is null || !p.IsConfigured)
-            return NaAplikaciju(greska: Greske.NijePodeseno);
+            return Povratak(klijent, greska: Greske.NijePodeseno);
 
         // Bez ispravnog challenge-a razmena kasnije ne bi mogla da uspe — bolje
         // odmah vratiti korisnika nego ga poslati kroz Facebook uzalud.
         if (!ExternalAuthTickets.IsValidChallenge(challenge))
-            return NaAplikaciju(greska: Greske.Opsta);
+            return Povratak(klijent, greska: Greske.Opsta);
 
-        var state = tickets.ProtectState(new(p.Name, challenge!, NormalizujReferral(referralCode)));
+        var state = tickets.ProtectState(new(p.Name, challenge!, NormalizujReferral(referralCode), klijent));
 
         return Redirect(p.BuildAuthorizeUrl(state, RedirectUri(p)));
     }
@@ -100,17 +117,22 @@ public sealed class ExternalAuthController(
     {
         var p = Nadji(provider);
         if (p is null)
-            return NaAplikaciju(greska: Greske.Opsta);
-
-        // Korisnik je na Google-ovoj/Facebook-ovoj stranici odbio ili zatvorio.
-        if (!string.IsNullOrEmpty(error))
-            return NaAplikaciju(greska: Greske.Otkazano);
+            return Povratak(null, greska: Greske.Opsta);
 
         // State čuva od podmetanja: bez njega bi napadač mogao da natera tuđu
         // aplikaciju da završi prijavu u NAPADAČEV nalog (login CSRF).
+        // Čita se PRE provere `error`, da i otkazivanje vrati sajt na sajt.
+        // Neispravan state → nema ni klijenta, povratak ide u aplikaciju.
         var st = string.IsNullOrEmpty(state) ? null : tickets.UnprotectState(state);
-        if (st is null || st.Provider != p.Name || string.IsNullOrEmpty(code))
-            return NaAplikaciju(greska: Greske.Opsta);
+        if (st is not null && st.Provider != p.Name) st = null;
+        var klijent = NormalizujKlijenta(st?.Client);
+
+        // Korisnik je na Google-ovoj/Facebook-ovoj stranici odbio ili zatvorio.
+        if (!string.IsNullOrEmpty(error))
+            return Povratak(klijent, greska: Greske.Otkazano);
+
+        if (st is null || string.IsNullOrEmpty(code))
+            return Povratak(klijent, greska: Greske.Opsta);
 
         ExternalIdentity identitet;
         try
@@ -120,22 +142,22 @@ public sealed class ExternalAuthController(
         catch (Exception ex) when (ex is ExternalAuthException or HttpRequestException or TaskCanceledException)
         {
             logger.LogWarning(ex, "Razmena koda sa {Provider} nije uspela.", p.Name);
-            return NaAplikaciju(greska: Greske.Opsta);
+            return Povratak(klijent, greska: Greske.Opsta);
         }
 
         var ishod = await externalLogin.RazresiAsync(identitet);
 
         return ishod switch
         {
-            Prijavljen pr => NaAplikaciju(kod: tickets.ProtectResult(
+            Prijavljen pr => Povratak(klijent, kod: tickets.ProtectResult(
                 new(st.Challenge, pr.User.Id, null, null))),
 
-            TrebaRegistracija => NaAplikaciju(kod: tickets.ProtectResult(
+            TrebaRegistracija => Povratak(klijent, kod: tickets.ProtectResult(
                 new(st.Challenge, null, identitet, st.ReferralCode))),
 
-            Odbijen od => NaAplikaciju(greska: od.Greska),
+            Odbijen od => Povratak(klijent, greska: od.Greska),
 
-            _ => NaAplikaciju(greska: Greske.Opsta)
+            _ => Povratak(klijent, greska: Greske.Opsta)
         };
     }
 
@@ -297,14 +319,24 @@ public sealed class ExternalAuthController(
         $"{(config["App:BaseUrl"] ?? string.Empty).TrimEnd('/')}/api/auth/{p.Name}/callback";
 
     /// <summary>
-    /// Nazad u aplikaciju. Rezultat ide u FRAGMENT (#), ne u query (?):
+    /// Nazad u aplikaciju ili na sajt. Rezultat ide u FRAGMENT (#), ne u query (?):
     /// pregledač fragment ne šalje nijednom serveru i ne upisuje ga u
     /// Referer zaglavlje.
+    ///
+    /// Adresa je uvek iz konfiguracije, nikad iz zahteva — <c>client</c> samo bira
+    /// jednu od dve, pa ovo ne može postati open redirect.
     /// </summary>
-    private RedirectResult NaAplikaciju(string? kod = null, string? greska = null) =>
-        Redirect(kod is not null
-            ? $"{AppCallback}#code={Uri.EscapeDataString(kod)}"
-            : $"{AppCallback}#error={Uri.EscapeDataString(greska ?? Greske.Opsta)}");
+    private RedirectResult Povratak(string? klijent, string? kod = null, string? greska = null)
+    {
+        var adresa = klijent == WebKlijent ? WebCallback : AppCallback;
+        return Redirect(kod is not null
+            ? $"{adresa}#code={Uri.EscapeDataString(kod)}"
+            : $"{adresa}#error={Uri.EscapeDataString(greska ?? Greske.Opsta)}");
+    }
+
+    /// <summary>„web" ili null (aplikacija). Nepoznata vrednost je aplikacija.</summary>
+    private static string? NormalizujKlijenta(string? client) =>
+        string.Equals(client?.Trim(), WebKlijent, StringComparison.OrdinalIgnoreCase) ? WebKlijent : null;
 
     private static string? NormalizujReferral(string? code) =>
         string.IsNullOrWhiteSpace(code) || code.Length > 20
