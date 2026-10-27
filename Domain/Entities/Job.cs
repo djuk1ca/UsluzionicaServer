@@ -25,8 +25,21 @@ public class Job
     /// <summary>Prazno posle izvršenja/brisanja — opis se ne čuva duže nego što treba.</summary>
     public string    Description { get; set; } = string.Empty;
 
-    /// <summary>null = „po dogovoru".</summary>
+    /// <summary>null = „po dogovoru". Volonterski posao je uvek null.</summary>
     public decimal?  PayAmount   { get; set; }
+
+    /// <summary>
+    /// Način isplate — određuje kako se iznos prikazuje („mesečno"). null iznos
+    /// je uvek <see cref="JobPayType.Negotiable"/>.
+    /// </summary>
+    public JobPayType PayType    { get; set; } = JobPayType.OneTime;
+
+    /// <summary>
+    /// Volonterski posao — građanske i studentske radne akcije za opšte dobro.
+    /// Bez isplate: iznos i tip se ne čuvaju i ne šalju; na pretrazi stoji u
+    /// sopstvenoj traci „Volonterske akcije" (vidi JobService.SearchAsync).
+    /// </summary>
+    public bool      IsVolunteer { get; set; }
 
     public JobStatus Status      { get; set; } = JobStatus.Open;
 

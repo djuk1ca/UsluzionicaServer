@@ -59,12 +59,12 @@ public sealed class JobService(
             Location    = NormalizujGrad(dto.Location),
             Title       = dto.Title.Trim(),
             Description = dto.Description.Trim(),
-            PayAmount   = dto.PayAmount,
             Status      = JobStatus.Open,
             ExpiresAt   = sada.AddDays(pravila.TrajanjeDana),
             CreatedAt   = sada,
             UpdatedAt   = sada
         };
+        PostaviIsplatu(job, dto.IsVolunteer, dto.PayAmount, dto.PayType);
 
         db.Jobs.Add(job);
         await db.SaveChangesAsync();
@@ -109,8 +109,11 @@ public sealed class JobService(
                 if (dto.Location is not null)      job.Location   = NormalizujGrad(dto.Location);
             }
 
-            if (dto.PayNegotiable)              job.PayAmount = null;
-            else if (dto.PayAmount is decimal i) job.PayAmount = i;
+            // Stari klijent šalje samo iznos: posao „po dogovoru" sa novim
+            // iznosom postaje jednokratan, ne ostaje bez iznosa.
+            var tip   = dto.PayType ?? (job.PayType == JobPayType.Negotiable ? JobPayType.OneTime : job.PayType);
+            var iznos = dto.PayNegotiable ? null : dto.PayAmount ?? job.PayAmount;
+            PostaviIsplatu(job, dto.IsVolunteer ?? job.IsVolunteer, iznos, tip);
         }
 
         job.Description = dto.Description.Trim();
@@ -358,6 +361,10 @@ public sealed class JobService(
     /// Istaknuti stoje u POSEBNOJ SEKCIJI: Boosted=true vraća samo njih
     /// (sekcija), Boosted=false samo ostale (lista) — posao se ne pojavljuje
     /// dvaput.
+    ///
+    /// Volonterski imaju SOPSTVENU TRAKU iznad obe: Volunteer=true vraća sve
+    /// volonterske (i istaknute), a sekcija i lista šalju Volunteer=false.
+    /// Klijent bez parametra dobija sve, kao pre volonterskih.
     /// </summary>
     public async Task<PagedJobs> SearchAsync(JobQueryParams p)
     {
@@ -383,6 +390,9 @@ public sealed class JobService(
             upit = upit.Where(j => j.IsBoosted && j.BoostExpiresAt > sada);
         else if (p.Boosted == false)
             upit = upit.Where(j => !(j.IsBoosted && j.BoostExpiresAt > sada));
+
+        if (p.Volunteer is bool volonterski)
+            upit = upit.Where(j => j.IsVolunteer == volonterski);
 
         if (!string.IsNullOrWhiteSpace(p.CategorySlug))
         {
@@ -415,7 +425,16 @@ public sealed class JobService(
         }
 
         var ukupno = await upit.CountAsync();
-        var poredak = p.Boosted == true
+        var poredak = p.Volunteer == true
+            // Traka „Volonterske akcije": istaknuti po BoostScore, pa akcije
+            // koje već okupljaju ljude (važeća javljanja), pa novije.
+            ? upit.OrderByDescending(j => j.IsBoosted && j.BoostExpiresAt > sada)
+                  .ThenByDescending(j => j.IsBoosted && j.BoostExpiresAt > sada ? j.BoostScore : 0m)
+                  .ThenByDescending(j => j.Applications.Count(a =>
+                      a.Status == JobApplicationStatus.Sent || a.Status == JobApplicationStatus.Chosen))
+                  .ThenByDescending(j => j.CreatedAt)
+                  .ThenByDescending(j => j.Id)
+            : p.Boosted == true
             ? upit.OrderByDescending(j => j.BoostScore).ThenByDescending(j => j.CreatedAt)
             : upit.OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id);
 
@@ -570,6 +589,17 @@ public sealed class JobService(
     private Task<bool> JeBlokiranoAsync(string a, string b) =>
         db.UserBlocks.AnyAsync(ub =>
             (ub.BlockerId == a && ub.BlockedId == b) || (ub.BlockerId == b && ub.BlockedId == a));
+
+    /// <summary>
+    /// Isplata posle objave ili izmene. Volonterski je bez isplate; bez iznosa
+    /// je uvek „po dogovoru", a „po dogovoru" nikad nema iznos.
+    /// </summary>
+    private static void PostaviIsplatu(Job job, bool volonterski, decimal? iznos, JobPayType tip)
+    {
+        job.IsVolunteer = volonterski;
+        job.PayAmount   = volonterski || tip == JobPayType.Negotiable ? null : iznos;
+        job.PayType     = job.PayAmount is null ? JobPayType.Negotiable : tip;
+    }
 
     private async Task<string?> ProveriKategorijuIGradAsync(int categoryId, string grad)
     {

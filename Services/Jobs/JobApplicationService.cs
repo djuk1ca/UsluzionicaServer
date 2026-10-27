@@ -86,7 +86,8 @@ public sealed class JobApplicationService(
         }
 
         prijava.Message     = poruka;
-        prijava.OfferAmount = dto.OfferAmount;
+        // Volonterski posao nema isplatu — ni ponuda se ne upisuje.
+        prijava.OfferAmount = job.IsVolunteer ? null : dto.OfferAmount;
         prijava.Status      = JobApplicationStatus.Sent;
         prijava.UpdatedAt   = sada;
 

@@ -71,12 +71,37 @@ public class JobsTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
     private Task<int> ObavestenjaAsync(string userId, NotificationKind kind) =>
         Query(db => db.Notifications.CountAsync(n => n.UserId == userId && n.Kind == kind));
 
-    private Task<PagedJobs> PretragaAsync(string gledalacId, bool? istaknuti = null) =>
+    private Task<PagedJobs> PretragaAsync(string gledalacId, bool? istaknuti = null, bool? volonterski = null, string? grad = null) =>
         WithService<JobService, PagedJobs>(svc => svc.SearchAsync(new JobQueryParams
         {
             ViewerUserId = gledalacId,
-            Boosted      = istaknuti
+            Boosted      = istaknuti,
+            Volunteer    = volonterski,
+            City         = grad
         }));
+
+    private async Task<JobDto> ObjaviSaIsplatomAsync(
+        string autorId, decimal? iznos, JobPayType tip, bool volonterski = false, string naslov = "Treba okačiti police")
+    {
+        var (job, greska) = await WithService<JobService, (JobDto?, string?)>(svc => svc.CreateAsync(autorId, new CreateJobDto
+        {
+            Title       = naslov,
+            CategoryId  = TestData.SeededCategoryId,
+            Location    = TestData.ValidCity,
+            Description = "Tri police u dnevnoj sobi, zid je od cigle.",
+            PayAmount   = iznos,
+            PayType     = tip,
+            IsVolunteer = volonterski
+        }));
+        job.Should().NotBeNull(greska);
+        return job!;
+    }
+
+    private Task IstakniAsync(int posaoId, decimal skor) =>
+        Query(db => db.Jobs.Where(j => j.Id == posaoId).ExecuteUpdateAsync(s => s
+            .SetProperty(j => j.IsBoosted, true)
+            .SetProperty(j => j.BoostScore, skor)
+            .SetProperty(j => j.BoostExpiresAt, DateTime.UtcNow.AddDays(3))));
 
     private static IFormFile Slika()
     {
@@ -530,6 +555,99 @@ public class JobsTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
         await WithService<JobOdrzavanje, JobOdrzavanje.Ishod>(svc => svc.ProdjiAsync());
         (await PosaoAsync(posaoId)).IsBoosted.Should().BeFalse();
         (await PretragaAsync(majstorId, istaknuti: false)).Items.Should().ContainSingle();
+    }
+
+    // ── Način isplate ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Isplata_MesecnaPlata_PoDogovoruBezIznosa()
+    {
+        var autor = await Data.CreateConfirmedUserAsync("autor@test.rs");
+
+        var plata = await ObjaviSaIsplatomAsync(autor.Id, 80_000m, JobPayType.Monthly, naslov: "Pomoć u radnji, ceo mesec");
+        plata.PayAmount.Should().Be(80_000m);
+        plata.PayType.Should().Be(JobPayType.Monthly);
+
+        // „Po dogovoru" je zaseban izbor: iznos se ne čuva, a bez iznosa nema drugog tipa.
+        (await ObjaviSaIsplatomAsync(autor.Id, 5000m, JobPayType.Negotiable, naslov: "Košenje trave u dvorištu"))
+            .Should().Match<JobDto>(j => j.PayAmount == null && j.PayType == JobPayType.Negotiable);
+        var bezIznosa = await ObjaviSaIsplatomAsync(autor.Id, null, JobPayType.Hourly, naslov: "Čuvanje psa vikendom");
+        bezIznosa.PayType.Should().Be(JobPayType.Negotiable);
+
+        // Stari klijent šalje samo iznos — „po dogovoru" postaje jednokratan.
+        var (ok, greska) = await WithService<JobService, (bool, string?)>(svc => svc.UpdateAsync(bezIznosa.Id, autor.Id,
+            new UpdateJobDto { Description = "Pas je miran, šetnja dva puta dnevno.", PayAmount = 2000m }));
+        ok.Should().BeTrue(greska);
+        var izmenjen = await PosaoAsync(bezIznosa.Id);
+        izmenjen.PayAmount.Should().Be(2000m);
+        izmenjen.PayType.Should().Be(JobPayType.OneTime);
+    }
+
+    // ── Volonterski ────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Volonterski_BezIsplate_CeoCiklusDoIzvrsenja()
+    {
+        var autor        = await Data.CreateConfirmedUserAsync("autor@test.rs", fullName: "Milica Autor");
+        var (majstor, _) = await Data.CreateProviderAsync("majstor@test.rs", fullName: "Petar Majstor");
+
+        // Iznos i način iz zahteva se ignorišu — volonterski nema isplatu.
+        var akcija = await ObjaviSaIsplatomAsync(autor.Id, 5000m, JobPayType.Monthly, volonterski: true,
+            naslov: "Čišćenje obale Dunava");
+        akcija.IsVolunteer.Should().BeTrue();
+        akcija.PayAmount.Should().BeNull();
+        akcija.PayType.Should().BeNull();
+        (await PosaoAsync(akcija.Id)).PayAmount.Should().BeNull();
+
+        var (prijava, _, greska) = await JaviSeAsync(akcija.Id, majstor.Id, ponuda: 2000m);
+        prijava.Should().NotBeNull(greska);
+        prijava!.OfferAmount.Should().BeNull("na volonterski posao se ne nudi iznos");
+
+        await IzaberiAsync(akcija.Id, autor.Id, prijava.Id);
+        await PomeriIzborAsync(akcija.Id, 4);
+        var (nagrada, greskaIzvrsenja) = await WithService<JobApplicationService, (decimal?, string?)>(svc =>
+            svc.CompleteAsync(akcija.Id, autor.Id));
+        nagrada.Should().NotBeNull(greskaIzvrsenja);
+        (await PosaoAsync(akcija.Id)).Status.Should().Be(JobStatus.Completed);
+    }
+
+    [Fact]
+    public async Task Volonterski_SopstvenaTraka_PoredakIBezPonavljanja()
+    {
+        var autor1 = await Data.CreateConfirmedUserAsync("autor1@test.rs");
+        var autor2 = await Data.CreateConfirmedUserAsync("autor2@test.rs");
+        var (m1, _) = await Data.CreateProviderAsync("m1@test.rs");
+        var (m2, _) = await Data.CreateProviderAsync("m2@test.rs");
+
+        var obican   = (await ObjaviSaIsplatomAsync(autor1.Id, 3000m, JobPayType.OneTime, naslov: "Obična selidba")).Id;
+        var istaknut = (await ObjaviSaIsplatomAsync(autor1.Id, 3000m, JobPayType.OneTime, naslov: "Istaknuta selidba")).Id;
+        var stara    = (await ObjaviSaIsplatomAsync(autor1.Id, null, JobPayType.OneTime, true, "Sadnja drveća u parku")).Id;
+        var popularna = (await ObjaviSaIsplatomAsync(autor2.Id, null, JobPayType.OneTime, true, "Krečenje škole u selu")).Id;
+        var nova     = (await ObjaviSaIsplatomAsync(autor2.Id, null, JobPayType.OneTime, true, "Prikupljanje knjiga za biblioteku")).Id;
+        var slabije  = (await ObjaviSaIsplatomAsync(autor2.Id, null, JobPayType.OneTime, true, "Čišćenje obale Dunava")).Id;
+        var jace     = (await ObjaviSaIsplatomAsync(autor2.Id, null, JobPayType.OneTime, true, "Radna akcija na nasipu")).Id;
+
+        await IstakniAsync(istaknut, 50m);
+        await IstakniAsync(slabije, 5m);
+        await IstakniAsync(jace, 9m);
+        await Query(db => db.Jobs.Where(j => j.Id == stara)
+            .ExecuteUpdateAsync(s => s.SetProperty(j => j.CreatedAt, DateTime.UtcNow.AddDays(-2))));
+        await JaviSeAsync(popularna, m1.Id);
+        await JaviSeAsync(popularna, m2.Id);
+
+        // Istaknuti po BoostScore, pa po broju javljanja, pa noviji.
+        (await PretragaAsync(m1.Id, volonterski: true)).Items.Select(j => j.Id).Should()
+            .Equal(jace, slabije, popularna, nova, stara);
+
+        // Volonterski (i istaknuti) samo u traci — sekcija i lista ih ne ponavljaju.
+        (await PretragaAsync(m1.Id, istaknuti: true, volonterski: false)).Items.Select(j => j.Id).Should().Equal(istaknut);
+        (await PretragaAsync(m1.Id, istaknuti: false, volonterski: false)).Items.Select(j => j.Id).Should().Equal(obican);
+
+        // Bez parametra — svi, kao pre volonterskih (stare verzije aplikacije).
+        (await PretragaAsync(m1.Id)).Total.Should().Be(7);
+
+        // Traka poštuje filtere pretrage.
+        (await PretragaAsync(m1.Id, volonterski: true, grad: "Subotica")).Items.Should().BeEmpty();
     }
 
     // ── Brisanje naloga ────────────────────────────────────────────────────

@@ -33,6 +33,7 @@ public sealed class PublicJobsController(JobService jobs) : ControllerBase
             City         = p.City,
             CategorySlug = p.CategorySlug,
             Boosted      = p.Boosted,
+            Volunteer    = p.Volunteer,
             Page         = p.Page,
             PageSize     = p.PageSize
         });

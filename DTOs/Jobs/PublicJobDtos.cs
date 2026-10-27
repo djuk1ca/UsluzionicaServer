@@ -1,3 +1,5 @@
+using UsluzionicaServer.Domain.Enums;
+
 namespace UsluzionicaServer.DTOs.Jobs;
 
 // ── Javni pregled (gost, bez naloga) ───────────────────────────────────────
@@ -19,8 +21,14 @@ public sealed class PublicJobDto
     /// <summary>Grad sa zvanične liste — posao nema tačnu adresu.</summary>
     public string     Location     { get; set; } = string.Empty;
 
-    /// <summary>null = „Po dogovoru".</summary>
+    /// <summary>null = „Po dogovoru" (ili volonterski).</summary>
     public decimal?   PayAmount    { get; set; }
+
+    /// <summary>Način isplate („80.000 RSD mesečno"). null = volonterski posao.</summary>
+    public JobPayType? PayType     { get; set; }
+
+    /// <summary>Volonterski posao — bez isplate, oznaka „Volonterski".</summary>
+    public bool       IsVolunteer  { get; set; }
 
     public DateTime   CreatedAt    { get; set; }
     public DateTime   ExpiresAt    { get; set; }
@@ -67,6 +75,9 @@ public sealed class PublicJobQueryParams
 
     /// <summary>true = samo istaknuti (sekcija), false = bez istaknutih (lista), null = svi.</summary>
     public bool?   Boosted      { get; set; }
+
+    /// <summary>true = traka „Volonterske akcije", false = bez volonterskih, null = svi.</summary>
+    public bool?   Volunteer    { get; set; }
 
     public int     Page         { get; set; } = 1;
     public int     PageSize     { get; set; } = 20;

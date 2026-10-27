@@ -2111,6 +2111,9 @@ namespace UsluzionicaServer.Migrations
                     b.Property<bool>("IsBoosted")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsVolunteer")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Location")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -2123,6 +2126,11 @@ namespace UsluzionicaServer.Migrations
 
                     b.Property<decimal?>("PayAmount")
                         .HasColumnType("decimal(10,2)");
+
+                    b.Property<string>("PayType")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
 
                     b.Property<DateTime?>("PurgeAt")
                         .HasColumnType("datetime2");
