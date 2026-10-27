@@ -25,6 +25,8 @@ public sealed class AuthService(
         //    zahtev se može poslati i mimo aplikacije, pa kapija mora biti ovde.
         if (!req.AcceptedPolicy)
             return (false, ["Morate prihvatiti politiku privatnosti."]);
+        if (req.ConfirmedAdult == false)
+            return (false, [PolicyVersion.SamoPunoletni]);
 
         // 1. Proveri da email nije zauzet (Identity to radi interno, ali dajemo jasniju grešku)
         if (await userManager.FindByEmailAsync(req.Email) is not null)
@@ -49,7 +51,7 @@ public sealed class AuthService(
             // politike ne može utvrditi ko je prihvatio koju, pa bi se nova
             // saglasnost morala tražiti od svih.
             PolicyAcceptedAt      = DateTime.UtcNow,
-            PolicyVersionAccepted = PolicyVersion.Current,
+            PolicyVersionAccepted = PolicyVersion.Za(req.ConfirmedAdult),
 
             AcquisitionSource     = AcquisitionSources.Normalizuj(req.AcquisitionSource)
         };

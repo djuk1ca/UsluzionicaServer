@@ -22,6 +22,15 @@ public sealed class RegisterRequest
     /// </summary>
     public bool AcceptedPolicy { get; set; }
 
+    /// <summary>
+    /// Korisnik je izjavio da ima najmanje 18 godina (isti checkbox kao saglasnost).
+    ///
+    /// Nullable namerno: stari klijenti ga ne šalju i ne odbijaju se — vidi
+    /// <see cref="Infrastructure.PolicyVersion.BezPotvrdeUzrasta"/>. Izričito
+    /// <c>false</c> se odbija.
+    /// </summary>
+    public bool? ConfirmedAdult { get; set; }
+
     /// <summary>„Kako si čuo za nas?" — opciono, vidi <c>AcquisitionSources</c>.</summary>
     public string? AcquisitionSource { get; set; }
 }

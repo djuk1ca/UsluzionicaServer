@@ -272,6 +272,7 @@ builder.Services.AddScoped<TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<UserService>();
+builder.Services.AddScoped<IzvozPodataka>();
 builder.Services.AddScoped<CategoryService>();
 builder.Services.AddScoped<ListingService>();
 builder.Services.AddScoped<ProviderService>();
