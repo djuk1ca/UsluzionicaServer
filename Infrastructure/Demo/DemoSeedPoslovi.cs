@@ -58,11 +58,13 @@ public static class DemoSeedPoslovi
         var stefan = await Id("stefan.t");
         var milica = await Id("milica.r");
 
-        async Task<int> Objavi(string autor, int kategorija, string naslov, string opis, decimal? plata)
+        async Task<int> Objavi(string autor, int kategorija, string naslov, string opis, decimal? plata,
+            JobPayType tip = JobPayType.OneTime, bool volonterski = false)
         {
             var (job, greska) = await U<JobService, (JobDto?, string?)>(s => s.CreateAsync(autor, new CreateJobDto
             {
-                Title = naslov, CategoryId = kategorija, Location = "Novi Sad", Description = opis, PayAmount = plata
+                Title = naslov, CategoryId = kategorija, Location = "Novi Sad", Description = opis, PayAmount = plata,
+                PayType = tip, IsVolunteer = volonterski
             }));
             return job?.Id ?? throw new InvalidOperationException($"DemoSeedPoslovi: „{naslov}\": {greska}");
         }
@@ -116,6 +118,37 @@ public static class DemoSeedPoslovi
             "Dvosoban stan od 54 m², zidovi su u dobrom stanju, samo bela boja. Nameštaj ću pomeriti sama.", 25000m);
         await db.Jobs.Where(j => j.Id == krecenje)
             .ExecuteUpdateAsync(s => s.SetProperty(j => j.ExpiresAt, DateTime.UtcNow.AddHours(20)));
+
+        // ── Načini isplate — mesečna plata, dugoročno, satnica ─────────────
+        await Objavi(marko, Ciscenje, "Održavanje poslovnog prostora",
+            "Kancelarija od 120 m² na Bulevaru, čišćenje tri puta nedeljno posle 17h. Sredstva obezbeđujemo.",
+            45_000m, JobPayType.Monthly);
+        await Objavi(milica, Torte, "Poslastičar za kafić, stalni angažman",
+            "Kafić na Grbavici traži nekoga ko će svakog jutra praviti kolače i torte za izlog. Rad u našoj kuhinji.",
+            80_000m, JobPayType.LongTerm);
+        await Objavi(nikola, Elektricar, "Pomoć oko električnih instalacija u kući",
+            "Kuća na Telepu, menjamo utičnice i prekidače u svim prostorijama. Radi se vikendom, koliko treba.",
+            1_200m, JobPayType.Hourly);
+
+        // ── Volonterske akcije — građanske i studentske radne akcije ───────
+        // Traka „Volonterske akcije": istaknuta prva, pa po broju javljanja.
+        var nasip = await Objavi(stefan, Ciscenje, "Čišćenje keja i nasipa kod Štranda",
+            "Studentska radna akcija u subotu od 9h. Džakove, rukavice i vodu obezbeđujemo, ponesite dobru volju.",
+            null, volonterski: true);
+        await JaviSe(nasip, marko, "Dolazim sa dvoje prijatelja, imamo i kolica za džakove.", null);
+        await JaviSe(nasip, nikola, "Mogu ceo dan, imam kombi za odvoz smeća.", null);
+
+        var skola = await Objavi(tamara, Moler, "Krečenje učionica u seoskoj školi",
+            "Osnovna škola u Čeneju, četiri učionice. Boju je donirala lokalna firma, treba nam još desetak ruku.",
+            null, volonterski: true);
+        await JaviSe(skola, stefan, "Krečio sam stan prošlog leta, dolazim sa valjcima.", null);
+        var (skolaIstaknuta, _) = await U<BoostService, (bool, string?)>(s =>
+            s.BoostJobAsync(skola, tamara, new BoostJobDto { TokensToSpend = 3, DurationDays = 3 }));
+        if (!skolaIstaknuta) logger.LogInformation("DemoSeedPoslovi: Tamara nema tokena, akcija ostaje neistaknuta.");
+
+        await Objavi(sanja, Selidbe, "Prikupljanje knjiga za biblioteku u Domu zdravlja",
+            "Skupljamo knjige za decu po kraju, treba pomoć oko prenošenja kutija i sređivanja polica.",
+            null, volonterski: true);
 
         // ── Jovanini (autor) — svako stanje ────────────────────────────────
         var frizider = await Objavi(jovana, Selidbe, "Prevoz frižidera do Detelinare",

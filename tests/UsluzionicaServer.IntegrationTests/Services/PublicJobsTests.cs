@@ -137,6 +137,37 @@ public class PublicJobsTests(DatabaseFixture fixture) : IntegrationTestBase(fixt
     }
 
     [Fact]
+    public async Task Pretraga_Volonterski_TrakaBezIsplate()
+    {
+        var (_, placen) = await ObjaviAsync("a@test.rs");
+        var autor = await Data.CreateConfirmedUserAsync("b@test.rs", fullName: "Ana Petrović");
+        var (akcija, greska) = await WithService<JobService, (JobDto?, string?)>(svc =>
+            svc.CreateAsync(autor.Id, new CreateJobDto
+            {
+                Title       = "Čišćenje obale Dunava",
+                CategoryId  = TestData.SeededCategoryId,
+                Location    = TestData.ValidCity,
+                Description = "Studentska radna akcija, rukavice i džakove obezbeđujemo.",
+                PayAmount   = 5000m,
+                IsVolunteer = true
+            }));
+        akcija.Should().NotBeNull(greska);
+
+        (await IdsAsync("?volunteer=true")).Should().Equal(akcija!.Id);
+        (await IdsAsync("?volunteer=false")).Should().Equal(placen);
+
+        var data = await DataAsync(await Factory.CreateClient().GetAsync("/api/public/jobs?volunteer=true"));
+        var posao = data.GetProperty("items")[0];
+        posao.GetProperty("isVolunteer").GetBoolean().Should().BeTrue();
+        posao.GetProperty("payAmount").ValueKind.Should().Be(JsonValueKind.Null);
+        posao.GetProperty("payType").ValueKind.Should().Be(JsonValueKind.Null);
+
+        var obican = (await DataAsync(await Factory.CreateClient().GetAsync($"/api/public/jobs/{placen}")));
+        obican.GetProperty("payType").GetString().Should().Be("OneTime");
+        obican.GetProperty("isVolunteer").GetBoolean().Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Pretraga_ViewerUserIdIzUpita_Ignorisan()
     {
         // Autor je blokirao gledaoca; da upit može da postavi gledaoca, posao bi nestao.

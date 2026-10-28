@@ -599,6 +599,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(j => j.Description).HasMaxLength(2000).IsRequired();
             e.Property(j => j.Location).HasMaxLength(200).IsRequired();
             e.Property(j => j.PayAmount).HasColumnType("decimal(10,2)");
+            e.Property(j => j.PayType).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.Status).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.ModerationState).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.BoostScore).HasColumnType("decimal(8,2)");
