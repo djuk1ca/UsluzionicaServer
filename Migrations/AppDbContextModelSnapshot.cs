@@ -2324,6 +2324,9 @@ namespace UsluzionicaServer.Migrations
                     b.Property<bool>("IsBoosted")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsOnline")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Location")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -2440,6 +2443,43 @@ namespace UsluzionicaServer.Migrations
                     b.HasIndex("IsActive", "ExpiresAt");
 
                     b.ToTable("ListingBoosts");
+                });
+
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ListingCity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<int>("ListingId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SearchCity")
+                        .IsRequired()
+                        .HasMaxLength(420)
+                        .IsUnicode(false)
+                        .HasColumnType("varchar(420)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ListingId");
+
+                    b.HasIndex("SearchCity")
+                        .HasDatabaseName("IX_ListingCities_SearchCity");
+
+                    SqlServerIndexBuilderExtensions.IncludeProperties(b.HasIndex("SearchCity"), new[] { "ListingId" });
+
+                    b.ToTable("ListingCities");
                 });
 
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ListingImage", b =>
@@ -3434,6 +3474,17 @@ namespace UsluzionicaServer.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ListingCity", b =>
+                {
+                    b.HasOne("UsluzionicaServer.Domain.Entities.Listing", "Listing")
+                        .WithMany("Cities")
+                        .HasForeignKey("ListingId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Listing");
+                });
+
             modelBuilder.Entity("UsluzionicaServer.Domain.Entities.ListingImage", b =>
                 {
                     b.HasOne("UsluzionicaServer.Domain.Entities.Listing", "Listing")
@@ -3776,6 +3827,8 @@ namespace UsluzionicaServer.Migrations
                     b.Navigation("BookingRequests");
 
                     b.Navigation("Boosts");
+
+                    b.Navigation("Cities");
 
                     b.Navigation("DiscountOffers");
 

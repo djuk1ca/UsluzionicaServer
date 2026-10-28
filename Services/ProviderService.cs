@@ -294,6 +294,7 @@ public sealed class ProviderService(
             .AsNoTracking()
             .Include(l => l.Category)
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
+            .Include(l => l.Cities)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             .Where(l => l.ProviderProfileId == providerProfileId &&
@@ -392,7 +393,9 @@ public sealed class ProviderService(
         Id           = l.Id,
         Title        = l.Title,
         Description  = l.Description,
-        Location     = l.Location,
+        Location     = ListingService.LegacyLocation(l),
+        Cities       = ListingService.CitiesOf(l),
+        IsOnline     = l.IsOnline,
         PriceMode    = l.PriceMode,
         FixedPrice   = l.FixedPrice,
         PriceFrom    = l.PriceFrom,

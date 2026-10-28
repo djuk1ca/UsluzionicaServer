@@ -9,7 +9,19 @@ public class Listing
     public int           CategoryId        { get; set; }
     public string        Title             { get; set; } = string.Empty;
     public string        Description       { get; set; } = string.Empty;
+    /// <summary>
+    /// Prvi grad iz <see cref="Cities"/>, ili prazno kad je oglas samo online.
+    /// Pravi spisak gradova je <see cref="Cities"/>; ovo polje ostaje zbog
+    /// starih klijenata i javnog sajta, i postavlja ga ListingService.
+    /// </summary>
     public string        Location          { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Usluga se pruža na daljinu (časovi preko interneta, dizajn, prevodi…).
+    /// Tada su gradovi opcioni: bez njih oglas je „samo online", sa njima
+    /// „online ili uživo u tim gradovima". Vidi ListingService.ResolveCities.
+    /// </summary>
+    public bool          IsOnline          { get; set; } = false;
     public PriceMode     PriceMode         { get; set; }
     public decimal?      FixedPrice        { get; set; }
     public decimal?      PriceFrom         { get; set; }
@@ -56,6 +68,7 @@ public class Listing
     public ProviderProfile               ProviderProfile       { get; set; } = null!;
     public Category                      Category              { get; set; } = null!;
     public ICollection<ListingImage>     Images                { get; set; } = [];
+    public ICollection<ListingCity>      Cities                { get; set; } = [];
     public ICollection<BookingRequest>   BookingRequests       { get; set; } = [];
     public ICollection<Review>           Reviews               { get; set; } = [];
     public ICollection<ListingBoost>     Boosts                { get; set; } = [];

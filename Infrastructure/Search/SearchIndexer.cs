@@ -24,7 +24,7 @@ public static class SearchIndexer
     public static void Apply(Listing listing)
     {
         listing.SearchTitle    = Truncate(SearchNormalizer.Fold(listing.Title),    TitleMax);
-        listing.SearchLocation = Truncate(SearchNormalizer.Fold(listing.Location), LocationMax);
+        listing.SearchLocation = Truncate(LocationIndex(listing), LocationMax);
         listing.SearchBody     = SearchNormalizer.Fold(listing.Description);  // varchar(max)
         listing.SearchVersion  = SearchNormalizer.Version;
     }
@@ -43,6 +43,42 @@ public static class SearchIndexer
         user.SearchName    = Truncate(SearchNormalizer.Fold(user.FullName), NameMax);
         user.SearchVersion = SearchNormalizer.Version;
     }
+
+    /// <summary>Grad oglasa — foldovan za filter grada (prefiks po svakom gradu).</summary>
+    public static void Apply(ListingCity city)
+    {
+        city.SearchCity = Truncate(SearchNormalizer.Fold(city.City), LocationMax);
+    }
+
+    /// <summary>
+    /// SearchLocation oglasa: SVI njegovi gradovi, pa reči „online onlajn" ako
+    /// je oglas online. Služi tekstualnom upitu — „moler cacak" nalazi oglas
+    /// kome je Čačak drugi grad, a „casovi online" (ili „онлајн") online oglas,
+    /// istim slojevima pretrage, bez posebnog predikata u svakom sloju.
+    ///
+    /// Filter grada NE ide preko ove kolone nego preko ListingCity.SearchCity:
+    /// prefiks „beograd%" nad spojenim tekstom bi pogađao samo prvi grad.
+    ///
+    /// Redovi bez gradova u kolekciji (stari, pre tabele gradova) padaju
+    /// nazad na Location, da se ne izgube iz pretrage.
+    /// </summary>
+    private static string LocationIndex(Listing listing)
+    {
+        var gradovi = listing.Cities.Count > 0
+            ? listing.Cities.OrderBy(c => c.SortOrder).Select(c => c.City)
+            : [listing.Location];
+
+        var delovi = gradovi
+            .Select(SearchNormalizer.Fold)
+            .Where(g => g.Length > 0)
+            .ToList();
+
+        if (listing.IsOnline) delovi.Add(OnlineReci);
+
+        return string.Join(' ', delovi);
+    }
+
+    private const string OnlineReci = "online onlajn";
 
     /// <summary>
     /// Preklapanje može PRODUŽITI tekst — „đ" postaje „dj", „љ" postaje „lj".
