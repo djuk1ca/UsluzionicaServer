@@ -111,8 +111,15 @@ public sealed class UserService(
         if (!cista)
             return (null, moderationError);
 
-        // Putanja: wwwroot/uploads/avatars/{userId}.{ext}
-        var fileName  = $"{userId}{ext}";
+        // Putanja: wwwroot/uploads/avatars/{userId}-{guid}.{ext}
+        //
+        // NOVO IME PRI SVAKOM SLANJU. Ranije je ime bilo samo {userId}, pa je
+        // nova profilna imala ISTI URL kao stara — WebView i pregledač su
+        // nastavljali da prikazuju keširanu staru sliku, sve do isteka keša.
+        // Sa isecanjem slike u aplikaciji to je postalo očigledno: korisnik
+        // iseče novi kadar, a vidi stari. Novi URL ne može da pogodi keš.
+        var prethodna = user.ProfileImageUrl;
+        var fileName  = $"{userId}-{Guid.NewGuid():N}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "avatars");
         Directory.CreateDirectory(uploadDir);
 
@@ -124,6 +131,11 @@ public sealed class UserService(
         var relativeUrl = $"/uploads/avatars/{fileName}";
         user.ProfileImageUrl = relativeUrl;
         await userManager.UpdateAsync(user);
+
+        // Stara datoteka se briše tek kad je nova upisana i u bazi — pad
+        // između ta dva koraka ostavlja korisnika sa starom slikom, a ne bez nje.
+        if (prethodna != relativeUrl)
+            TryDeleteAvatarFile(prethodna);
 
         // Ovaj metod vraća URL direktno (ne kroz DTO), pa ga MediaUrlJsonModifier
         // ne dohvata — sastavljamo pun URL ovde da klijent dobije prikazivu vrednost.
