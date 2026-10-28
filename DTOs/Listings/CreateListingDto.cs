@@ -44,7 +44,7 @@ public sealed class CreateListingDto
     /// <summary>Obavezno ako je PriceMode = Range.</summary>
     public decimal? PriceFrom  { get; set; }
 
-    /// <summary>Obavezno ako je PriceMode = Range.</summary>
+    /// <summary>Opciono i za PriceMode = Range („od 7.000 RSD"). Ako je upisano, mora biti ≥ PriceFrom.</summary>
     public decimal? PriceTo    { get; set; }
 }
 

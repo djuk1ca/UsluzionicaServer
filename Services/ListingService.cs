@@ -1023,10 +1023,14 @@ public sealed class ListingService(
         {
             PriceMode.Fixed      when fixed_ is null or <= 0
                 => "Za fiksu cenu, unesi pozitivan iznos u polju fixedPrice.",
-            PriceMode.Range      when from is null || to is null || from <= 0 || to <= 0
-                => "Za cenovni raspon, unesi priceFrom i priceTo (oba pozitivna).",
-            PriceMode.Range      when from >= to
-                => "priceFrom mora biti manji od priceTo.",
+            // „Do" je opciono: „od 7.000 RSD" je potpuna cena. Ako je upisano,
+            // ne sme biti ispod „od"; isti iznos je dozvoljen i prikazuje se kao jedna cena.
+            PriceMode.Range      when from is null or <= 0
+                => "Za cenovni raspon, unesi pozitivan iznos u polju priceFrom.",
+            PriceMode.Range      when to is <= 0
+                => "priceTo mora biti pozitivan iznos ili prazno.",
+            PriceMode.Range      when to < from
+                => "priceTo ne sme biti manji od priceFrom.",
             _   => null
         };
     }
