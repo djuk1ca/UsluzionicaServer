@@ -516,6 +516,140 @@ public sealed class ListingService(
         return MapToDto(listing);
     }
 
+    // ── SIMILAR (javno, „Preporučeni oglasi") ──────────────────────────────
+
+    /// <summary>Podrazumevan broj preporuka — red od 8 kartica na dnu detalja.</summary>
+    public const int SimilarDefaultTake = 8;
+
+    /// <summary>Gornja granica — sekcija je dodatak stranici, ne druga pretraga.</summary>
+    public const int SimilarMaxTake = 20;
+
+    /// <summary>
+    /// Oglasi slični datom, za sekciju „Preporučeni oglasi" na dnu detalja.
+    /// Vraća null ako izvorni oglas za ovog gledaoca ne postoji — isti uslovi
+    /// kao <see cref="GetByIdAsync"/>, da preporuke ne otkriju oglas koji
+    /// detalj krije.
+    ///
+    /// Kandidati prolaze kroz isti <see cref="BuildBaseQueryAsync"/> kao
+    /// pretraga: samo aktivni, bez ugašenih naloga, bez blokiranih u oba smera.
+    ///
+    /// Dva kruga:
+    ///   1. Ista kategorija kao izvorni oglas.
+    ///   2. Ako ih je manje od <paramref name="take"/> — dopuna iz srodnih:
+    ///      sestrinske podkategorije i sam roditelj; za oglas u roditeljskoj
+    ///      kategoriji, njene podkategorije.
+    /// Prvi krug uvek ide ispred drugog, bez obzira na boost — oglas iz tačno
+    /// iste kategorije je bolja preporuka od istaknutog iz susedne.
+    ///
+    /// Unutar kruga: istaknuti (boost nije istekao) pa BoostScore, zatim isti
+    /// grad kao izvorni oglas, pa ocena uslugodavca, pa noviji.
+    /// </summary>
+    public async Task<List<ListingDto>?> GetSimilarAsync(
+        int id, int take = SimilarDefaultTake, string? viewerUserId = null)
+    {
+        take = Math.Clamp(take, 1, SimilarMaxTake);
+
+        var izvor = await db.Listings
+            .AsNoTracking()
+            .Where(l => l.Id == id && l.Status != ListingStatus.Archived)
+            .Select(l => new
+            {
+                l.CategoryId,
+                l.Category.ParentId,
+                l.Location,
+                VlasnikId     = l.ProviderProfile.UserId,
+                VlasnikAktivan = l.ProviderProfile.User.IsActive
+            })
+            .FirstOrDefaultAsync();
+
+        if (izvor is null) return null;
+
+        // Isti uslovi skrivanja kao GetByIdAsync, ali bez uvećavanja ViewCount.
+        if (!izvor.VlasnikAktivan && viewerUserId != izvor.VlasnikId)
+            return null;
+
+        if (viewerUserId is not null && viewerUserId != izvor.VlasnikId)
+        {
+            var blokirano = await db.UserBlocks.AnyAsync(ub =>
+                (ub.BlockerId == viewerUserId    && ub.BlockedId == izvor.VlasnikId) ||
+                (ub.BlockerId == izvor.VlasnikId && ub.BlockedId == viewerUserId));
+
+            if (blokirano) return null;
+        }
+
+        var kandidati = (await BuildBaseQueryAsync(new ListingQueryParams { ViewerUserId = viewerUserId }))
+            .Where(l => l.Id != id)
+            // Uklonjen oglas je već arhiviran (ReportService), pa ga Status
+            // gore ionako sakriva. Ovo je druga brana, kao IsActive vlasnika.
+            .Where(l => l.ModerationState != ModerationState.Removed);
+
+        var grad    = GradIzLokacije(izvor.Location);
+        var sada    = DateTime.UtcNow;
+
+        var rezultat = await UzmiSlicneAsync(
+            kandidati.Where(l => l.CategoryId == izvor.CategoryId), grad, sada, take);
+
+        if (rezultat.Count < take)
+        {
+            // Srodne kategorije: za podkategoriju — braća i roditelj, za
+            // roditelja — njegova deca. Lista je mala (najviše dvadesetak id-eva).
+            var roditeljId = izvor.ParentId ?? izvor.CategoryId;
+            var srodne = await db.Categories
+                .Where(c => (c.ParentId == roditeljId || c.Id == roditeljId) && c.Id != izvor.CategoryId)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            // Izvorna kategorija je isključena iz srodnih, pa se krugovi ne
+            // preklapaju i nema duplikata.
+            if (srodne.Count > 0)
+                rezultat.AddRange(await UzmiSlicneAsync(
+                    kandidati.Where(l => srodne.Contains(l.CategoryId)),
+                    grad, sada, take - rezultat.Count));
+        }
+
+        var dtos = rezultat.Select(MapToDto).ToList();
+        await StampFavoritesAsync(dtos, viewerUserId);
+        return dtos;
+    }
+
+    /// <summary>Jedan krug preporuka — redosled je opisan na <see cref="GetSimilarAsync"/>.</summary>
+    private static Task<List<Listing>> UzmiSlicneAsync(
+        IQueryable<Listing> query, string grad, DateTime sada, int take)
+    {
+        // Isti grad: tačno poklapanje ili grad + opština ("beograd vracar").
+        // Razmak posle grada je namerno deo obrasca — bez njega bi „novi"
+        // hvatao i „novi sad" i „novi pazar".
+        var gradObrazac = SearchNormalizer.EscapeLike(grad) + " %";
+
+        return query
+            // Istaknut = zastavica I neistekao rok, kao u „Istaknuto" na
+            // početnoj — BoostExpiryService gasi zastavicu tek jednom na sat.
+            .OrderByDescending(l => l.IsBoosted && (l.BoostExpiresAt == null || l.BoostExpiresAt > sada))
+            // BoostScore samo među istaknutima: kod ostalih može ostati
+            // zaostala vrednost do sledećeg prolaza BoostExpiryService-a.
+            .ThenByDescending(l => l.IsBoosted && (l.BoostExpiresAt == null || l.BoostExpiresAt > sada)
+                ? l.BoostScore : 0m)
+            .ThenByDescending(l => grad != "" &&
+                (l.SearchLocation == grad || EF.Functions.Like(l.SearchLocation, gradObrazac, LikeEscape)))
+            .ThenByDescending(l => l.ProviderProfile.AverageRating)
+            .ThenByDescending(l => l.CreatedAt)
+            .ThenByDescending(l => l.Id)
+            .Take(take)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Grad iz lokacije oglasa, foldovan: „Beograd — Vračar" → „beograd".
+    /// Seče se PRE foldovanja jer Fold pretvara crtu u razmak, pa se grad
+    /// posle više ne bi razlikovao od opštine.
+    /// </summary>
+    private static string GradIzLokacije(string? lokacija)
+    {
+        if (string.IsNullOrWhiteSpace(lokacija)) return string.Empty;
+        var kraj = lokacija.IndexOfAny(['—', '–', '-', ',', '(']);
+        return SearchNormalizer.Fold(kraj > 0 ? lokacija[..kraj] : lokacija);
+    }
+
     // ── CREATE ─────────────────────────────────────────────────────────────
     /// <summary>
     /// Kreira listing. Korisnik mora imati ProviderProfile.
