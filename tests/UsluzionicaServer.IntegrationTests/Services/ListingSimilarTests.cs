@@ -73,9 +73,9 @@ public class ListingSimilarTests(DatabaseFixture fixture) : IntegrationTestBase(
         var roditelj  = await Data.CreateActiveListingAsync(provider.Id, "Beauty paket",   categoryId: Beauty);
         await BoostujAsync(sestrinska, provider.Id);
 
-        var rezultat = await Slicni(izvor);
+        var rezultat = (await Slicni(izvor))!;
 
-        rezultat!.Select(l => l.Id).Should().HaveCount(3);
+        rezultat.Select(l => l.Id).Should().HaveCount(3);
         rezultat[0].Id.Should().Be(ista);
         rezultat.Skip(1).Select(l => l.Id).Should().BeEquivalentTo([sestrinska, roditelj]);
     }
