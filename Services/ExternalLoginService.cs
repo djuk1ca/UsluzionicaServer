@@ -93,6 +93,8 @@ public sealed class ExternalLoginService(
     {
         if (!req.AcceptedPolicy)
             return (null, "Morate prihvatiti politiku privatnosti.");
+        if (req.ConfirmedAdult == false)
+            return (null, PolicyVersion.SamoPunoletni);
 
         // Idempotentno. Karta za registraciju važi 30 minuta i nije jednokratna,
         // pa dupli tap na „Napravi nalog" ne sme da napravi dva naloga ni da
@@ -127,7 +129,7 @@ public sealed class ExternalLoginService(
             EmailConfirmed = true,
 
             PolicyAcceptedAt      = DateTime.UtcNow,
-            PolicyVersionAccepted = PolicyVersion.Current,
+            PolicyVersionAccepted = PolicyVersion.Za(req.ConfirmedAdult),
 
             AcquisitionSource     = AcquisitionSources.Normalizuj(req.AcquisitionSource)
         };
