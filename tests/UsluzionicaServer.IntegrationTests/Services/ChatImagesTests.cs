@@ -149,7 +149,11 @@ public class ChatImagesTests(DatabaseFixture fixture) : IntegrationTestBase(fixt
 
         (await ProcitajAsync(url)).Should().NotBeNull();
 
-        (await WithService<ChatImageService, byte[]?>(s => s.ProcitajAsync(id, u, exp, sig[..^2] + "AA"))).Should().BeNull("izmenjen potpis");
+        // Menja se PRVI znak, ne poslednji: u base64url od 32 bajta poslednji
+        // znak nosi samo 4 bita, pa „…AA" ponekad dekodira u iste bajtove i
+        // test je povremeno padao. Prvi znak uvek nosi punih 6 bita.
+        var izmenjen = (sig[0] == 'A' ? "B" : "A") + sig[1..];
+        (await WithService<ChatImageService, byte[]?>(s => s.ProcitajAsync(id, u, exp, izmenjen))).Should().BeNull("izmenjen potpis");
 
         var treci = await Data.CreateConfirmedUserAsync("treci@test.rs");
         var tudj  = Factory.Services.GetRequiredService<ChatMediaStore>().PotpisanUrl(id, treci.Id);
