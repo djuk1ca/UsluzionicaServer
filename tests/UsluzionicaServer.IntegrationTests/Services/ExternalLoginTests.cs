@@ -243,9 +243,9 @@ public class ExternalLoginTests(DatabaseFixture fixture) : IntegrationTestBase(f
         druga.Should().NotBe(prva);
 
         var webRoot = Factory.Services.GetRequiredService<IWebHostEnvironment>().WebRootPath;
-        File.Exists(Path.Combine(webRoot, "uploads", "avatars", Path.GetFileName(prva!)))
+        File.Exists(Path.Join(webRoot, "uploads", "avatars", Path.GetFileName(prva!)))
             .Should().BeFalse("stara profilna se briše kad nova uspe");
-        File.Exists(Path.Combine(webRoot, "uploads", "avatars", Path.GetFileName(druga!)))
+        File.Exists(Path.Join(webRoot, "uploads", "avatars", Path.GetFileName(druga!)))
             .Should().BeTrue();
     }
 
