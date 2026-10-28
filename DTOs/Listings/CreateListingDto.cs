@@ -12,8 +12,25 @@ public sealed class CreateListingDto
     [Required, MaxLength(5000)]
     public string Description { get; set; } = string.Empty;
 
-    [Required, MaxLength(100)]
-    public string Location    { get; set; } = string.Empty;
+    /// <summary>
+    /// Gradovi usluge, sa zvanične liste opština, najviše
+    /// ListingService.MaxGradova. Bar jedan je obavezan kad oglas nije online
+    /// — to proverava ListingService.ResolveCities, ne atribut, jer zavisi od
+    /// IsOnline. Null = stari klijent koji šalje samo <see cref="Location"/>.
+    /// </summary>
+    public List<string>? Cities { get; set; }
+
+    /// <summary>
+    /// Stari oblik: jedan grad. Koristi se samo kad <see cref="Cities"/> nije
+    /// poslat. Nullable namerno: uz &lt;Nullable&gt; MVC bi ne-nullable string
+    /// tretirao kao [Required] i odbio online oglas bez grada.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Location   { get; set; }
+
+    /// <summary>Usluga se pruža na daljinu. Tada gradovi nisu obavezni.
+    /// Null (stari klijent) = nije online.</summary>
+    public bool? IsOnline     { get; set; }
 
     [Required]
     public int CategoryId     { get; set; }
@@ -40,8 +57,15 @@ public sealed class UpdateListingDto
     [Required, MaxLength(5000)]
     public string Description { get; set; } = string.Empty;
 
-    [Required, MaxLength(100)]
-    public string Location    { get; set; } = string.Empty;
+    /// <summary>Isto kao u CreateListingDto. Null = stari klijent: gradovi
+    /// se ne diraju dok <see cref="Location"/> ostaje prvi grad.</summary>
+    public List<string>? Cities { get; set; }
+
+    [MaxLength(100)]
+    public string? Location   { get; set; }
+
+    /// <summary>Null (stari klijent) = ostaje kako je bilo.</summary>
+    public bool? IsOnline     { get; set; }
 
     [Required]
     public int CategoryId     { get; set; }
