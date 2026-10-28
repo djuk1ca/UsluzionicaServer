@@ -647,7 +647,7 @@ public class JobsTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
         (await PretragaAsync(m1.Id)).Total.Should().Be(7);
 
         // Traka poštuje filtere pretrage.
-        (await PretragaAsync(m1.Id, volonterski: true, grad: "Subotica")).Items.Should().BeEmpty();
+        (await PretragaAsync(m1.Id, volonterski: true, grad: "Čačak")).Items.Should().BeEmpty();
     }
 
     // ── Brisanje naloga ────────────────────────────────────────────────────
@@ -725,7 +725,9 @@ public class JobsTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
 
         var stanja = await Query(db => db.Jobs.GroupBy(j => j.Status)
             .Select(g => new { g.Key, Broj = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Broj));
-        stanja[JobStatus.Open].Should().Be(4);
+        stanja[JobStatus.Open].Should().Be(10);
+        (await Query(db => db.Jobs.CountAsync(j => j.IsVolunteer && j.PayAmount == null))).Should().Be(3);
+        (await Query(db => db.Jobs.CountAsync(j => j.PayType == JobPayType.LongTerm))).Should().Be(1);
         stanja[JobStatus.Assigned].Should().Be(2);
         stanja[JobStatus.Expired].Should().Be(1);
         stanja[JobStatus.Completed].Should().Be(2);
