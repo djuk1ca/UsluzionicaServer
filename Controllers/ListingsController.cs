@@ -56,6 +56,27 @@ public sealed class ListingsController(
         return Ok(new { success = true, data = listing });
     }
 
+    // ── GET /api/listings/{id}/similar ────────────────────────────────────
+    /// <summary>
+    /// „Preporučeni oglasi" na dnu detalja: aktivni oglasi iz iste kategorije,
+    /// dopunjeni srodnim podkategorijama. Isti oblik kao kartice pretrage.
+    /// Javni endpoint; ako stigne token, poštuju se blokade kao u pretrazi.
+    /// Query: ?take=8 (1–20)
+    /// </summary>
+    [HttpGet("{id:int}/similar")]
+    [ProducesResponseType(typeof(List<ListingDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSimilar(int id, [FromQuery] int take = ListingService.SimilarDefaultTake)
+    {
+        // Gledalac samo iz tokena, kao u Search.
+        var viewerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var items = await listingService.GetSimilarAsync(id, take, viewerId);
+        if (items is null)
+            return NotFound(new { success = false, message = "Listing nije pronađen." });
+
+        return Ok(new { success = true, data = items });
+    }
+
     // ── GET /api/listings/my ──────────────────────────────────────────────
     /// <summary>
     /// Vraća sve listinge prijavljenog provajdera (osim arhiviranih).
