@@ -1040,6 +1040,77 @@ public sealed class ListingService(
         return (true, null);
     }
 
+    // ── REORDER IMAGES ─────────────────────────────────────────────────────
+    /// <summary>
+    /// Menja redosled slika oglasa. Prva slika u listi postaje glavna — ona se
+    /// prikazuje na kartici u pretrazi (sve liste sortiraju po SortOrder).
+    ///
+    /// ZAŠTO SE TRAŽI CEO SKUP
+    /// Lista mora sadržati TAČNO sve slike oglasa, svaku jednom. Delimična lista
+    /// („samo pomeri ovu na prvo mesto") bi ostavila ostale sa starim
+    /// SortOrder-om, pa bi dve slike mogle dobiti isti broj i redosled bi
+    /// zavisio od toga kako ih baza vrati. Ceo skup znači da je novo stanje
+    /// potpuno određeno onim što je klijent video na ekranu.
+    ///
+    /// Isto hvata i zastareo ekran: ako je slika u međuvremenu obrisana ili
+    /// dodata sa drugog uređaja, skup se ne poklapa i zahtev se odbija umesto
+    /// da tiho primeni redosled koji niko nije video.
+    ///
+    /// Rupe u SortOrder-u koje ostavlja DeleteImageAsync se ovde zatvaraju —
+    /// upisuje se 0..n-1 po redu iz liste.
+    ///
+    /// Nova slika ne ulazi, pa nema ni nove provere sadržaja: svaka slika je
+    /// prošla ImageModerationGate pri upload-u. Stanje moderacije po slici ne
+    /// postoji — slika u bazi je slika koja se prikazuje, pa je redosled
+    /// uvek nad svim slikama oglasa.
+    /// </summary>
+    /// <returns>
+    /// <c>NijePronadjeno</c> je <c>true</c> kad oglas ne postoji ili nije
+    /// korisnikov (404). Ostale greške su neispravan zahtev (400).
+    /// </returns>
+    public async Task<(List<ListingImageDto>? Result, string? Error, bool NijePronadjeno)> ReorderImagesAsync(
+        int listingId, string userId, IReadOnlyList<int> imageIds)
+    {
+        var listing = await GetOwnedListingAsync(listingId, userId);
+        if (listing is null)
+            return (null, "Listing nije pronađen ili nemate pravo izmene.", true);
+
+        if (listing.Status == ListingStatus.Archived)
+            return (null, ArhiviranPoruka, false);
+
+        // Duplikat se proverava zasebno: {1, 1, 2} prema slikama {1, 2, 3} ima
+        // isti broj elemenata, pa bi samo poređenje broja to propustilo.
+        if (imageIds.Distinct().Count() != imageIds.Count)
+            return (null, "Ista slika se u redosledu ne sme pojaviti dva puta.", false);
+
+        var images = await db.ListingImages
+            .Where(i => i.ListingId == listingId)
+            .ToListAsync();
+
+        var postojece = images.Select(i => i.Id).ToHashSet();
+        if (imageIds.Count != postojece.Count || !postojece.SetEquals(imageIds))
+            return (null,
+                "Redosled mora sadržati tačno sve slike oglasa. " +
+                "Osveži oglas i pokušaj ponovo.", false);
+
+        var poId = images.ToDictionary(i => i.Id);
+        for (var redniBroj = 0; redniBroj < imageIds.Count; redniBroj++)
+            poId[imageIds[redniBroj]].SortOrder = redniBroj;
+
+        listing.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return (images
+            .OrderBy(i => i.SortOrder)
+            .Select(i => new ListingImageDto
+            {
+                Id        = i.Id,
+                ImageUrl  = i.ImageUrl,
+                SortOrder = i.SortOrder
+            })
+            .ToList(), null, false);
+    }
+
     // ── GET BY PROVIDER ────────────────────────────────────────────────────
     public async Task<List<ListingDto>> GetByProviderAsync(string userId)
     {
