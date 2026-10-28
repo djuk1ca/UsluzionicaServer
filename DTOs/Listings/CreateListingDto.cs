@@ -60,3 +60,13 @@ public sealed class UpdateListingStatusDto
     [Required]
     public string Status { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// DTO za promenu redosleda slika oglasa. Prvi id postaje glavna slika.
+/// Mora sadržati tačno sve slike oglasa, svaku jednom.
+/// </summary>
+public sealed class ReorderListingImagesDto
+{
+    [Required]
+    public List<int> ImageIds { get; set; } = [];
+}

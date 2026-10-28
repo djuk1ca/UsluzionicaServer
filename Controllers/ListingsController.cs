@@ -221,6 +221,30 @@ public sealed class ListingsController(
         return Ok(new { success = true, message = "Slika obrisana." });
     }
 
+    // ── PUT /api/listings/{id}/images/order ───────────────────────────────
+    /// <summary>
+    /// Menja redosled slika listinga. Samo vlasnik.
+    /// Telo: { "imageIds": [3, 1, 2] } — prva slika postaje glavna (kartica u pretrazi).
+    /// Lista mora sadržati tačno sve slike listinga, svaku jednom.
+    /// Vraća slike sortirane novim redom.
+    /// </summary>
+    [Authorize]
+    [HttpPut("{id:int}/images/order")]
+    [ProducesResponseType(typeof(List<ListingImageDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReorderImages(int id, [FromBody] ReorderListingImagesDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var (result, error, nijePronadjeno) =
+            await listingService.ReorderImagesAsync(id, userId, dto.ImageIds);
+
+        if (nijePronadjeno) return NotFound(new { success = false, message = error });
+        if (error is not null) return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, data = result });
+    }
+
     // ── POST /api/listings/{id}/boost ─────────────────────────────────────
     /// <summary>
     /// Provider boostuje sopstveni listing trošeći tokene.
