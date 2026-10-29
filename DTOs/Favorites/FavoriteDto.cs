@@ -13,6 +13,10 @@ public sealed class FavoriteListingDto
     public int      ListingId     { get; init; }
     public string   Title         { get; init; } = string.Empty;
     public string   Location      { get; init; } = string.Empty;
+
+    /// <summary>Svi gradovi oglasa i oznaka online — isto kao u ListingDto.</summary>
+    public List<string> Cities    { get; init; } = [];
+    public bool     IsOnline      { get; init; }
     public string   CategoryName  { get; init; } = string.Empty;
     public string   CategorySlug  { get; init; } = string.Empty;
     public string   PriceMode     { get; init; } = string.Empty;

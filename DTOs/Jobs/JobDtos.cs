@@ -20,8 +20,14 @@ public sealed class JobDto
     public string     CategorySlug { get; set; } = string.Empty;
     public string     Location     { get; set; } = string.Empty;
 
-    /// <summary>null = „Po dogovoru".</summary>
+    /// <summary>null = „Po dogovoru" (ili volonterski).</summary>
     public decimal?   PayAmount    { get; set; }
+
+    /// <summary>Način isplate („80.000 RSD mesečno"). null = volonterski posao.</summary>
+    public JobPayType? PayType     { get; set; }
+
+    /// <summary>Volonterski posao — bez isplate, oznaka „Volonterski".</summary>
+    public bool       IsVolunteer  { get; set; }
 
     public JobStatus  Status       { get; set; }
     public DateTime   CreatedAt    { get; set; }
@@ -178,6 +184,12 @@ public sealed class JobQueryParams
     /// <summary>true = samo istaknuti (sekcija), false = bez istaknutih (lista), null = svi.</summary>
     public bool?   Boosted      { get; set; }
 
+    /// <summary>
+    /// true = samo volonterski (traka „Volonterske akcije", sopstveni poredak),
+    /// false = bez volonterskih (sekcija istaknutih i lista), null = svi.
+    /// </summary>
+    public bool?   Volunteer    { get; set; }
+
     public int     Page         { get; set; } = 1;
     public int     PageSize     { get; set; } = 20;
 
@@ -202,6 +214,12 @@ public sealed class CreateJobDto
     /// <summary>null = „po dogovoru".</summary>
     [Range(1, 10_000_000)]
     public decimal? PayAmount   { get; set; }
+
+    /// <summary>Način isplate. Bez iznosa uvek postaje Negotiable.</summary>
+    public JobPayType PayType   { get; set; } = JobPayType.OneTime;
+
+    /// <summary>Volonterski — iznos i način isplate se ignorišu.</summary>
+    public bool     IsVolunteer { get; set; }
 }
 
 /// <summary>Izmena — dok ima javljanja, menjaju se SAMO opis (slike idu posebno).</summary>
@@ -223,6 +241,12 @@ public sealed class UpdateJobDto
 
     /// <summary>true = „po dogovoru" (PayAmount se briše).</summary>
     public bool     PayNegotiable { get; set; }
+
+    /// <summary>null = ne menja se. Negotiable briše iznos kao PayNegotiable.</summary>
+    public JobPayType? PayType  { get; set; }
+
+    /// <summary>null = ne menja se. true briše iznos i način isplate.</summary>
+    public bool?    IsVolunteer { get; set; }
 }
 
 public sealed class ApplyToJobDto
@@ -232,6 +256,7 @@ public sealed class ApplyToJobDto
      MaxLength(500)]
     public string   Message     { get; set; } = string.Empty;
 
+    /// <summary>Na volonterski posao se ne upisuje — nema isplate.</summary>
     [Range(1, 10_000_000)]
     public decimal? OfferAmount { get; set; }
 }

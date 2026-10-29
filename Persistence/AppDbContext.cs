@@ -16,6 +16,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<ProviderCategory>    ProviderCategories   => Set<ProviderCategory>();
     public DbSet<Listing>             Listings             => Set<Listing>();
     public DbSet<ListingImage>        ListingImages        => Set<ListingImage>();
+    public DbSet<ListingCity>         ListingCities        => Set<ListingCity>();
     public DbSet<Conversation>        Conversations        => Set<Conversation>();
     public DbSet<Message>             Messages             => Set<Message>();
     public DbSet<MessageAttachment>   MessageAttachments   => Set<MessageAttachment>();
@@ -111,9 +112,33 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 
     private void RefreshSearchIndex()
     {
-        foreach (var entry in ChangeTracker.Entries<Listing>())
+        // Gradovi oglasa ulaze u Listing.SearchLocation, pa promena samo
+        // grada (bez ijedne izmene na oglasu) mora da osveži i oglas.
+        var gradoviMenjani = new HashSet<int>();
+        foreach (var entry in ChangeTracker.Entries<ListingCity>())
+        {
             if (entry.State is EntityState.Added or EntityState.Modified)
                 Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
+
+            if (entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+                gradoviMenjani.Add(entry.Property(c => c.ListingId).CurrentValue);
+        }
+
+        foreach (var entry in ChangeTracker.Entries<Listing>())
+        {
+            var menjan = entry.State is EntityState.Added or EntityState.Modified
+                || (entry.State == EntityState.Unchanged && gradoviMenjani.Contains(entry.Entity.Id));
+            if (!menjan) continue;
+
+            // Izmenjen oglas učitan BEZ gradova (promena statusa, backfill…)
+            // bi dobio SearchLocation bez njih — i ispao iz pretrage po gradu
+            // u tekstu. Zato se gradovi ovde dovlače ako već nisu.
+            var gradovi = entry.Collection(l => l.Cities);
+            if (entry.State != EntityState.Added && !gradovi.IsLoaded)
+                gradovi.Load();
+
+            Infrastructure.Search.SearchIndexer.Apply(entry.Entity);
+        }
 
         foreach (var entry in ChangeTracker.Entries<ApplicationUser>())
             if (entry.State is EntityState.Added or EntityState.Modified)
@@ -552,6 +577,26 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
              .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // ── ListingCity ────────────────────────────────────────────────────
+        builder.Entity<ListingCity>(e =>
+        {
+            e.Property(c => c.City).HasMaxLength(200).IsRequired();
+
+            // varchar iz istog razloga kao Listing.SearchLocation — vidi gore.
+            e.Property(c => c.SearchCity).HasMaxLength(420).IsUnicode(false).IsRequired();
+
+            e.HasOne(c => c.Listing)
+             .WithMany(l => l.Cities)
+             .HasForeignKey(c => c.ListingId)
+             .OnDelete(DeleteBehavior.Cascade);
+
+            // Filter grada je EXISTS nad ovom tabelom: seek po prefiksu, pa
+            // ListingId iz istog indeksa, bez skoka na tabelu.
+            e.HasIndex(c => c.SearchCity)
+             .IncludeProperties(c => new { c.ListingId })
+             .HasDatabaseName("IX_ListingCities_SearchCity");
+        });
+
         // ── Conversation ───────────────────────────────────────────────────
         builder.Entity<Conversation>(e =>
         {
@@ -599,6 +644,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
             e.Property(j => j.Description).HasMaxLength(2000).IsRequired();
             e.Property(j => j.Location).HasMaxLength(200).IsRequired();
             e.Property(j => j.PayAmount).HasColumnType("decimal(10,2)");
+            e.Property(j => j.PayType).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.Status).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.ModerationState).HasConversion<string>().HasMaxLength(16);
             e.Property(j => j.BoostScore).HasColumnType("decimal(8,2)");

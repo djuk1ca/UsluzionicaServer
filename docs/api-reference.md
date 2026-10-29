@@ -128,6 +128,7 @@ Activation requires a confirmed email, and it is what triggers the second referr
 | DELETE | `/api/listings/{id}` | auth |
 | POST | `/api/listings/{id}/images` | auth |
 | DELETE | `/api/listings/{id}/images/{imageId}` | auth |
+| PUT | `/api/listings/{id}/images/order` | auth |
 | POST | `/api/listings/{id}/boost` | auth |
 
 `GET /api/listings` is the search endpoint:
@@ -141,6 +142,8 @@ Activation requires a confirmed email, and it is what triggers the second referr
 | `pageSize` | int | default 20, max 50 |
 
 The full four-tier algorithm is documented in [search.md](search.md). Results are always ordered boosted-first; there is no parameter to request only boosted listings.
+
+`PUT /{id}/images/order` takes `imageIds` — every image of the listing exactly once, in the new order; the first becomes the main image shown on the search card. A partial list, a foreign id or a duplicate is a `400`, as is an archived listing; someone else's or a missing listing is a `404`. The response is the images in their new order, with `sortOrder` renumbered `0..n-1`.
 
 `POST /{id}/boost` takes `tokensToSpend` and `durationDays` (3, 7 or 14). Token deduction is atomic — see [token-economy.md](token-economy.md).
 

@@ -10,7 +10,7 @@ namespace UsluzionicaServer.Controllers;
 
 [ApiController]
 [Route("api/users")]
-public sealed class UsersController(UserService userService) : ControllerBase
+public sealed class UsersController(UserService userService, IzvozPodataka izvoz) : ControllerBase
 {
     // ── GET /api/users/me ─────────────────────────────────────────────────
     /// <summary>
@@ -67,6 +67,30 @@ public sealed class UsersController(UserService userService) : ControllerBase
             return BadRequest(new { success = false, message = error });
 
         return Ok(new { success = true, message = "Nalog je obrisan." });
+    }
+
+    // ── GET /api/users/me/export ──────────────────────────────────────────
+    /// <summary>
+    /// Izvoz svih podataka o prijavljenom korisniku kao JSON fajl — pravo na
+    /// pristup i prenosivost (ZZPL, GDPR čl. 15 i 20). Vidi <see cref="IzvozPodataka"/>.
+    /// Ograničen kao endpointi koji šalju mejl: upit je težak, a potreba retka.
+    /// </summary>
+    [Authorize]
+    [HttpGet("me/export")]
+    [EnableRateLimiting("email")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ExportMe()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var podaci = await izvoz.NapraviAsync(userId);
+        if (podaci is null)
+            return NotFound(new { success = false, message = "Korisnik nije pronađen." });
+
+        // Prilog, ne običan odgovor: pregledač ga odmah snima kao fajl.
+        Response.Headers.ContentDisposition =
+            $"attachment; filename=\"usluzionica-podaci-{DateTime.UtcNow:yyyy-MM-dd}.json\"";
+        return Ok(new { success = true, data = podaci });
     }
 
     // ── POST /api/users/me/avatar ─────────────────────────────────────────

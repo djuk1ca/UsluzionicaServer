@@ -56,6 +56,27 @@ public sealed class ListingsController(
         return Ok(new { success = true, data = listing });
     }
 
+    // ── GET /api/listings/{id}/similar ────────────────────────────────────
+    /// <summary>
+    /// „Preporučeni oglasi" na dnu detalja: aktivni oglasi iz iste kategorije,
+    /// dopunjeni srodnim podkategorijama. Isti oblik kao kartice pretrage.
+    /// Javni endpoint; ako stigne token, poštuju se blokade kao u pretrazi.
+    /// Query: ?take=8 (1–20)
+    /// </summary>
+    [HttpGet("{id:int}/similar")]
+    [ProducesResponseType(typeof(List<ListingDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetSimilar(int id, [FromQuery] int take = ListingService.SimilarDefaultTake)
+    {
+        // Gledalac samo iz tokena, kao u Search.
+        var viewerId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var items = await listingService.GetSimilarAsync(id, take, viewerId);
+        if (items is null)
+            return NotFound(new { success = false, message = "Listing nije pronađen." });
+
+        return Ok(new { success = true, data = items });
+    }
+
     // ── GET /api/listings/my ──────────────────────────────────────────────
     /// <summary>
     /// Vraća sve listinge prijavljenog provajdera (osim arhiviranih).
@@ -219,6 +240,30 @@ public sealed class ListingsController(
             return NotFound(new { success = false, message = error });
 
         return Ok(new { success = true, message = "Slika obrisana." });
+    }
+
+    // ── PUT /api/listings/{id}/images/order ───────────────────────────────
+    /// <summary>
+    /// Menja redosled slika listinga. Samo vlasnik.
+    /// Telo: { "imageIds": [3, 1, 2] } — prva slika postaje glavna (kartica u pretrazi).
+    /// Lista mora sadržati tačno sve slike listinga, svaku jednom.
+    /// Vraća slike sortirane novim redom.
+    /// </summary>
+    [Authorize]
+    [HttpPut("{id:int}/images/order")]
+    [ProducesResponseType(typeof(List<ListingImageDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReorderImages(int id, [FromBody] ReorderListingImagesDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var (result, error, nijePronadjeno) =
+            await listingService.ReorderImagesAsync(id, userId, dto.ImageIds);
+
+        if (nijePronadjeno) return NotFound(new { success = false, message = error });
+        if (error is not null) return BadRequest(new { success = false, message = error });
+
+        return Ok(new { success = true, data = result });
     }
 
     // ── POST /api/listings/{id}/boost ─────────────────────────────────────

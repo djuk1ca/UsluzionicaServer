@@ -1,3 +1,4 @@
+using System.Globalization;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Jobs;
@@ -28,7 +29,10 @@ public static class JobMapa
             CategoryName = j.Category?.Name ?? string.Empty,
             CategorySlug = j.Category?.Slug ?? string.Empty,
             Location     = j.Location,
-            PayAmount    = j.PayAmount,
+            // Volonterski nema isplatu — ni iznos ni način ne izlaze.
+            PayAmount    = j.IsVolunteer ? null : j.PayAmount,
+            PayType      = j.IsVolunteer ? null : j.PayType,
+            IsVolunteer  = j.IsVolunteer,
             Status       = j.Status,
             CreatedAt    = j.CreatedAt,
             ExpiresAt    = j.ExpiresAt,
@@ -93,6 +97,59 @@ public static class JobMapa
             IsVerified        = profil?.IsVerified ?? false,
             MemberSince       = u.CreatedAt
         };
+
+    /// <summary>
+    /// JobDto → oblik za gosta. Prepisuje se polje po polje — sve što ovde
+    /// nije navedeno (UserId autora, MyApplication, Assigned…) ne izlazi.
+    /// </summary>
+    public static PublicJobDto Javni(JobDto j) => new()
+    {
+        Id           = j.Id,
+        Title        = j.Title,
+        Description  = j.Description,
+        CategoryName = j.CategoryName,
+        CategorySlug = j.CategorySlug,
+        Location     = j.Location,
+        PayAmount    = j.PayAmount,
+        PayType      = j.PayType,
+        IsVolunteer  = j.IsVolunteer,
+        CreatedAt    = j.CreatedAt,
+        ExpiresAt    = j.ExpiresAt,
+        IsBoosted    = j.IsBoosted,
+        ApplicationsCount = j.ApplicationsCount,
+        Images = j.Images
+            .Select(i => new PublicJobImageDto { ImageUrl = i.ImageUrl, SortOrder = i.SortOrder })
+            .ToList(),
+        Author = new PublicJobAuthorDto
+        {
+            FullName    = KratkoIme(j.Author.FullName),
+            Rating      = j.Author.Rating,
+            RatingCount = j.Author.RatingCount,
+            IsVerified  = j.Author.IsVerified
+        }
+    };
+
+    /// <summary>
+    /// „Sanja Marković" → „Sanja M.". Ime + inicijal poslednje reči, da gost
+    /// ne može da pretraži autora po punom imenu. Jedna reč ostaje kakva jeste.
+    ///
+    /// Lj, Nj i Dž su jedno slovo u azbuci, pa je „Ljubić" → „Lj.", ne „L.".
+    /// </summary>
+    public static string KratkoIme(string? punoIme)
+    {
+        var reci = (punoIme ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (reci.Length == 0) return string.Empty;
+        if (reci.Length == 1) return reci[0];
+
+        var prezime = reci[^1];
+        var duzina  = prezime.Length >= 2 && Digrafi.Contains(prezime[..2], StringComparer.OrdinalIgnoreCase)
+            ? 2
+            : StringInfo.GetNextTextElementLength(prezime);
+
+        return $"{reci[0]} {prezime[..1].ToUpperInvariant()}{prezime[1..duzina].ToLowerInvariant()}.";
+    }
+
+    private static readonly string[] Digrafi = ["Lj", "Nj", "Dž"];
 
     /// <summary>
     /// Isticanje važi samo dok je posao aktivan i dok rok nije prošao —

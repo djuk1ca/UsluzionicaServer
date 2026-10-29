@@ -108,7 +108,14 @@ public sealed class FavoriteService(
                 FavoriteId   = f.Id,
                 ListingId    = f.ListingId,
                 Title        = f.Listing.Title,
-                Location     = f.Listing.Location,
+                // Isto pravilo kao ListingService.LegacyLocation, ali u SQL-u.
+                Location     = f.Listing.Location == "" && f.Listing.IsOnline
+                                 ? "Online" : f.Listing.Location,
+                Cities       = f.Listing.Cities
+                                 .OrderBy(c => c.SortOrder)
+                                 .Select(c => c.City)
+                                 .ToList(),
+                IsOnline     = f.Listing.IsOnline,
                 CategoryName = f.Listing.Category.Name,
                 CategorySlug = f.Listing.Category.Slug,
                 PriceMode    = f.Listing.PriceMode.ToString(),
