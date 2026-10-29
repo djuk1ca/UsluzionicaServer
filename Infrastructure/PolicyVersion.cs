@@ -39,6 +39,19 @@ public static class PolicyVersion
 
     public const string SamoPunoletni = "Uslužionica je samo za punoletne (18+).";
 
+    /// <summary>
+    /// Saglasnost potrebna za nov nalog, ista za registraciju lozinkom i preko
+    /// Google-a, Facebook-a i Apple-a. Null = sve u redu, inače poruka za korisnika.
+    ///
+    /// Obe vrednosti su korisnikova izjava (checkbox), pa ih po prirodi šalje
+    /// klijent; server samo traži da izjava postoji. Na jednom mestu da se dva
+    /// toka ne bi razišla kad <c>ConfirmedAdult</c> postane obavezan.
+    /// </summary>
+    public static string? GreskaSaglasnosti(bool prihvatioPolitiku, bool? potvrdioPunoletstvo) =>
+        !prihvatioPolitiku          ? "Morate prihvatiti politiku privatnosti."
+        : potvrdioPunoletstvo == false ? SamoPunoletni
+        : null;
+
     /// <summary>„2026-10" (uslovi + izjava o punoletstvu) ili „2026-09" (samo uslovi).</summary>
     public static string Za(bool? potvrdioPunoletstvo) =>
         potvrdioPunoletstvo == true ? Current : BezPotvrdeUzrasta;

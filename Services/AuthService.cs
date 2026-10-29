@@ -23,10 +23,8 @@ public sealed class AuthService(
         // 0. Saglasnost sa politikom privatnosti je preduslov za nalog.
         //    Klijent već onemogućava dugme, ali to je pogodnost za korisnika —
         //    zahtev se može poslati i mimo aplikacije, pa kapija mora biti ovde.
-        if (!req.AcceptedPolicy)
-            return (false, ["Morate prihvatiti politiku privatnosti."]);
-        if (req.ConfirmedAdult == false)
-            return (false, [PolicyVersion.SamoPunoletni]);
+        if (PolicyVersion.GreskaSaglasnosti(req.AcceptedPolicy, req.ConfirmedAdult) is { } saglasnost)
+            return (false, [saglasnost]);
 
         // 1. Proveri da email nije zauzet (Identity to radi interno, ali dajemo jasniju grešku)
         if (await userManager.FindByEmailAsync(req.Email) is not null)

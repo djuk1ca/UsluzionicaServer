@@ -91,10 +91,8 @@ public sealed class ExternalLoginService(
     public async Task<(ApplicationUser? User, string? Error)> RegistrujAsync(
         ExternalIdentity id, ExternalRegisterRequest req, string? referralIzPrijave)
     {
-        if (!req.AcceptedPolicy)
-            return (null, "Morate prihvatiti politiku privatnosti.");
-        if (req.ConfirmedAdult == false)
-            return (null, PolicyVersion.SamoPunoletni);
+        if (PolicyVersion.GreskaSaglasnosti(req.AcceptedPolicy, req.ConfirmedAdult) is { } saglasnost)
+            return (null, saglasnost);
 
         // Idempotentno. Karta za registraciju važi 30 minuta i nije jednokratna,
         // pa dupli tap na „Napravi nalog" ne sme da napravi dva naloga ni da
