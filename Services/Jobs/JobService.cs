@@ -513,7 +513,7 @@ public sealed class JobService(
                         nova.Add(new ForYouItemDto
                         {
                             Kind = "new-applications", JobId = j.Id, JobTitle = j.Title,
-                            Subtitle = dto.NewApplicationsCount == 1 ? "1 novo javljanje" : $"{dto.NewApplicationsCount} nova javljanja"
+                            Subtitle = NovePrijave(dto.NewApplicationsCount)
                         });
                     break;
 
@@ -534,7 +534,7 @@ public sealed class JobService(
         return rez;
     }
 
-    /// <summary>„Javio sam se" — poslovi na koje se uslugodavac javio, sa stanjem javljanja.</summary>
+    /// <summary>„Prijavio sam se" — poslovi na koje se uslugodavac prijavio, sa stanjem prijave.</summary>
     public async Task<List<AppliedJobDto>> AppliedAsync(string providerId)
     {
         var sada = DateTime.UtcNow;
@@ -618,5 +618,13 @@ public sealed class JobService(
     {
         var f = SearchNormalizer.Fold(unos);
         return SerbianMunicipalities.All.FirstOrDefault(g => SearchNormalizer.Fold(g) == f) ?? string.Empty;
+    }
+
+    /// <summary>„1 nova prijava", „3 nove prijave", „5 novih prijava" (21 → jednina, 11–14 → genitiv).</summary>
+    public static string NovePrijave(int n)
+    {
+        var d = n % 10; var s = n % 100;
+        if (d == 1 && s != 11) return $"{n} nova prijava";
+        return d is >= 2 and <= 4 && s is < 12 or > 14 ? $"{n} nove prijave" : $"{n} novih prijava";
     }
 }
