@@ -34,6 +34,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
     public DbSet<UserBlock>           UserBlocks           => Set<UserBlock>();
     public DbSet<DeviceToken>         DeviceTokens         => Set<DeviceToken>();
     public DbSet<WaitlistBonus>       WaitlistBonuses      => Set<WaitlistBonus>();
+    public DbSet<WaitlistEmail>       WaitlistEmails       => Set<WaitlistEmail>();
+    public DbSet<WaitlistOptOut>      WaitlistOptOuts      => Set<WaitlistOptOut>();
     public DbSet<Job>                 Jobs                 => Set<Job>();
     public DbSet<JobImage>            JobImages            => Set<JobImage>();
     public DbSet<JobApplication>      JobApplications      => Set<JobApplication>();
@@ -1043,6 +1045,24 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
 
             e.HasIndex(w => w.EmailHash).IsUnique();
             e.HasIndex(w => w.UserId).IsUnique();
+        });
+
+        // ── WaitlistEmail / WaitlistOptOut ─────────────────────────────────
+        // Mejl listi čekanja — vidi ListaCekanjaMejl. (Campaign, EmailHash) je
+        // brana od duplikata: isti mejl istoj adresi ne može dvaput.
+        builder.Entity<WaitlistEmail>(e =>
+        {
+            e.Property(w => w.Campaign).HasMaxLength(40).IsRequired();
+            e.Property(w => w.EmailHash).HasMaxLength(64).IsRequired();
+            e.Property(w => w.Error).HasMaxLength(200);
+
+            e.HasIndex(w => new { w.Campaign, w.EmailHash }).IsUnique();
+        });
+
+        builder.Entity<WaitlistOptOut>(e =>
+        {
+            e.Property(w => w.EmailHash).HasMaxLength(64).IsRequired();
+            e.HasIndex(w => w.EmailHash).IsUnique();
         });
     }
 }

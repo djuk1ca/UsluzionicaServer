@@ -164,6 +164,11 @@ Everything is supplied as environment variables in production, using ASP.NET's `
 | `Redis__Connection` | optional — everything degrades gracefully without it |
 | `Email__Host`, `__Port`, `__Username`, `__Password`, `__From` | SMTP; required in Production |
 | `ASPNETCORE_ENVIRONMENT` | `Production` enables the stricter rules |
+| `Waitlist__IosLaunchDate` (`.env`: `WAITLIST_IOS_LAUNCH_DATE`) | **iOS release date**, `yyyy-MM-dd`. Starts the 60-day bonus window for the iPhone waitlist, appears in the launch email, and unlocks sending it — the email is refused while this is empty or in the future |
+| `Waitlist__AndroidLaunchDate` (`.env`: `WAITLIST_ANDROID_LAUNCH_DATE`) | Android release date, same format and rules for the Android list |
+| `App__AppStoreUrl` (`.env`: `APP_STORE_URL`) | App Store link for the waitlist email. Empty = the preview shows a placeholder and real sending is refused |
+| `App__GooglePlayUrl` (`.env`: `GOOGLE_PLAY_URL`) | Google Play link, the secondary "have Android?" line in the same email |
+| `Waitlist__Email__BatchSize`, `__PauseSeconds`, `__MaxPerRun` | waitlist email pacing (20 / 60 s / 80 per run) — keep under the SMTP provider's daily limit, which verification emails share |
 
 `.env.example` documents every value with the constraints that apply. `SecretsGuard` verifies them at startup and refuses to run with a missing or previously-leaked value.
 

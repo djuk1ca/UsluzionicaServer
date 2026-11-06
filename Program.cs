@@ -281,6 +281,8 @@ builder.Services.AddScoped<ReferralService>();
 // parsiranu listu dok se fajl ne promeni.
 builder.Services.AddSingleton<ListaCekanja>();
 builder.Services.AddScoped<ListaCekanjaBonus>();
+// Mejl „stigli smo na App Store" listi čekanja — admin radnja, vidi ListaCekanjaMejl.
+builder.Services.AddScoped<ListaCekanjaMejl>();
 builder.Services.AddScoped<ChatSender>();
 builder.Services.AddScoped<ConversationService>();
 builder.Services.AddSingleton<JobPravila>();
@@ -521,6 +523,7 @@ var reportWindowHours = builder.Configuration.GetValue("RateLimit:ReportWindowHo
 var jobPermitLimit    = builder.Configuration.GetValue("RateLimit:JobPermitLimit",    10);
 var chatImagePermitLimit = builder.Configuration.GetValue("RateLimit:ChatImagePermitLimit", 20);
 var publicPermitLimit = builder.Configuration.GetValue("RateLimit:PublicPermitLimit", 300);
+var adminMailPermitLimit = builder.Configuration.GetValue("RateLimit:AdminMailPermitLimit", 20);
 
 builder.Services.AddRateLimiter(options =>
 {
@@ -632,6 +635,23 @@ builder.Services.AddRateLimiter(options =>
             {
                 PermitLimit = publicPermitLimit,
                 Window      = TimeSpan.FromMinutes(1),
+                QueueLimit  = 0
+            }));
+
+    // Mejl listi čekanja (dry-run, slanje, proba) — 20 na sat po admin nalogu.
+    // Sama radnja je već iza Admin uloge; ovo je osigurač da skripta u petlji
+    // ili zaglavljen klijent ne pokrenu slanje stotinu puta (svako pravo
+    // pokretanje troši dnevni limit SMTP provajdera).
+    options.AddPolicy("admin-mail", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.User.FindFirst(
+                              System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                          ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = adminMailPermitLimit,
+                Window      = TimeSpan.FromHours(1),
                 QueueLimit  = 0
             }));
 

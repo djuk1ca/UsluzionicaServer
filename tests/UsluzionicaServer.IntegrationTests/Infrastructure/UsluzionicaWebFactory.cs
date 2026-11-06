@@ -87,6 +87,7 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 ["RateLimit:JobPermitLimit"]    = "100000",
                 ["RateLimit:ChatImagePermitLimit"] = "100000",
                 ["RateLimit:PublicPermitLimit"]    = "100000",
+                ["RateLimit:AdminMailPermitLimit"] = "100000",
 
                 // Eksplicitno postavljeno jer se appsettings i kod razilaze:
                 // kod podrazumeva 3 dana, appsettings.json ima 0 (čime je
@@ -109,6 +110,11 @@ public sealed class UsluzionicaWebFactory(string connectionString) : WebApplicat
                 // da test dokaže da se čita iz konfiguracije.
                 ["Waitlist:Path"]        = ListaCekanjaPutanja,
                 ["Waitlist:BonusTokens"] = "7",
+
+                // Mejl listi čekanja: bez pauze između paketa (testovi ne čekaju
+                // minute), a paket namerno mali da test prođe kroz više paketa.
+                ["Waitlist:Email:BatchSize"]    = "2",
+                ["Waitlist:Email:PauseSeconds"] = "0",
             });
         });
 

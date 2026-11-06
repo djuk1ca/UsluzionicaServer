@@ -150,7 +150,20 @@ services:
       # roku od 60 dana. Dok je prazno, svi upisi na tu listu važe.
       Waitlist__Path: /lista-cekanja/prijave.jsonl
       Waitlist__AndroidLaunchDate: ${WAITLIST_ANDROID_LAUNCH_DATE:-}
+      # WAITLIST_IOS_LAUNCH_DATE je ujedno DATUM IZLASKA NA iOS-u za ceo server:
+      # bez njega (ili dok je u budućnosti) mejl listi čekanja se ne šalje.
       Waitlist__IosLaunchDate: ${WAITLIST_IOS_LAUNCH_DATE:-}
+
+      # ── MEJL LISTI ČEKANJA („stigli smo na App Store") ───────────────────
+      # Admin radnja POST /api/admin/waitlist/launch-email — dry-run je
+      # podrazumevan (Services/ListaCekanjaMejl.cs). APP_STORE_URL prazno =
+      # pravo slanje odbijeno. Paketi/pauza/max štite dnevni limit SMTP-a, koji
+      # dele i verifikacioni mejlovi.
+      App__AppStoreUrl: ${APP_STORE_URL:-}
+      App__GooglePlayUrl: ${GOOGLE_PLAY_URL:-https://play.google.com/store/apps/details?id=rs.usluzionica.app}
+      Waitlist__Email__BatchSize: ${WAITLIST_EMAIL_BATCH_SIZE:-20}
+      Waitlist__Email__PauseSeconds: ${WAITLIST_EMAIL_PAUSE_SECONDS:-60}
+      Waitlist__Email__MaxPerRun: ${WAITLIST_EMAIL_MAX_PER_RUN:-80}
 
     volumes:
       # Serilog file sink pise ovde — vidi Program.cs.
