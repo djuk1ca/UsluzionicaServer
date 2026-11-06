@@ -3,7 +3,9 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -129,7 +131,7 @@ public class ListaCekanjaMejlTests(DatabaseFixture fixture) : IntegrationTestBas
         data.GetProperty("poslato").GetInt32().Should().Be(0);
 
         var html = data.GetProperty("pregledSaBonusom").GetProperty("html").GetString();
-        html.Should().Contain("Preuzmi na App Store-u")
+        html.Should().Contain("alt=\"Preuzmi u App Storeu\"")
             .And.Contain(ListaCekanjaMejlSablon.AppStorePlaceholder)   // link još nije upisan
             .And.Contain("Odjavi se");
 
@@ -353,7 +355,7 @@ public class ListaCekanjaMejlTests(DatabaseFixture fixture) : IntegrationTestBas
             .And.Contain("iphone@lista.rs")
             .And.Contain($"do {rok}")
             .And.Contain(AppStore);
-        saBonusom.Html.Should().Contain("Preuzmi na App Store-u").And.Contain(AppStore);
+        saBonusom.Html.Should().Contain("alt=\"Preuzmi u App Storeu\"").And.Contain(AppStore);
 
         bezBonusa.Subject.Should().NotContain("tokena");
         bezBonusa.Text.Should().NotContain("na startu dobijaš");
@@ -408,19 +410,120 @@ public class ListaCekanjaMejlTests(DatabaseFixture fixture) : IntegrationTestBas
 
     // ── Proba ──────────────────────────────────────────────────────────────
 
+    /// <summary>Host sa upisanim App Store linkom — za probu preko API-ja, kao iz Admin → Alati.</summary>
+    private WebApplicationFactory<Program> HostSaLinkom(string link) =>
+        Factory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, c) =>
+            c.AddInMemoryCollection(new Dictionary<string, string?> { ["App:AppStoreUrl"] = link })));
+
+    private async Task<HttpClient> AdminNa(WebApplicationFactory<Program> host)
+    {
+        var admin = await Data.CreateAdminAsync();
+        var token = await WithService<TokenService, string>(async t =>
+        {
+            using var scope = Factory.Services.CreateScope();
+            var users = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+            return t.GenerateAccessToken(admin, await users.GetRolesAsync(admin));
+        });
+        var client = host.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        return client;
+    }
+
     [Fact]
     public async Task Proba_IdeSamoNaNavedenuAdresu_INeBeleziSeKaoPoslato()
     {
         Upisi(Factory.ListaCekanjaPutanja, "vlasnik@lista.rs");
         Upisi(Factory.ListaCekanjaPutanja, "drugi@lista.rs");
+        await using var host = HostSaLinkom(AppStore);
+        var admin = await AdminNa(host);
+
+        // Isti oblik zahteva i odgovora kao Admin → Alati → „Pošalji probu".
+        var odgovor = await admin.PostAsJsonAsync("/api/admin/waitlist/launch-email/test",
+                                                  new { email = "vlasnik@lista.rs", saBonusom = true });
+
+        odgovor.StatusCode.Should().Be(HttpStatusCode.OK);
+        var naslov = JsonDocument.Parse(await odgovor.Content.ReadAsStringAsync())
+            .RootElement.GetProperty("data").GetProperty("naslov").GetString();
+        naslov.Should().StartWith("[PROBA]");
+
+        Primaoci().Should().Equal("vlasnik@lista.rs");
+        var mejl = Email.ListaCekanja.Single();
+        mejl.Subject.Should().Be(naslov);
+        mejl.Html.Should().Contain($"href=\"{AppStore}\"").And.NotContain("POPUNI");
+        (await Query(db => db.WaitlistEmails.CountAsync())).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Proba_BezAppStoreLinka_JeOdbijena_SaJasnomPorukom()
+    {
+        // Host nema App:AppStoreUrl — ranije je proba tiho slala placeholder,
+        // pa je dugme vodilo na „Cannot Connect".
         var admin = await AdminAsync();
 
         var odgovor = await admin.PostAsJsonAsync("/api/admin/waitlist/launch-email/test",
                                                   new { email = "vlasnik@lista.rs" });
 
+        odgovor.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await odgovor.Content.ReadAsStringAsync()).Should().Contain("APP_STORE_URL").And.Contain("App__AppStoreUrl");
+        Email.ListaCekanja.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Proba_NeispravanLink_JeOdbijena()
+    {
+        var akcija = () => Mejl(new() { ["App:AppStoreUrl"] = "apps.apple.com/bez-seme" },
+                                m => m.ProbaAsync("vlasnik@lista.rs"));
+
+        (await akcija.Should().ThrowAsync<ListaCekanjaMejl.Odbijeno>())
+            .WithMessage("*nije ispravan link*");
+        Email.ListaCekanja.Should().BeEmpty();
+    }
+
+    // ── Izgled: bedž i slike ───────────────────────────────────────────────
+
+    [Fact]
+    public async Task LinkIzKonfiguracije_ZavrsiUHrefBedza_BezDvostrukogKodiranja()
+    {
+        // Pravi App Store linkovi imaju ž u putanji i & u upitu.
+        const string link = "https://apps.apple.com/rs/app/uslužionica/id1234567890?l=sr&mt=8";
+        var putanja = NovaLista();
+        Upisi(putanja, "bedz@lista.rs");
+        var konf = Izasao(putanja);
+        konf["App:AppStoreUrl"] = link;
+
+        await Posalji(konf);
+
+        var html = Email.ListaCekanja.Single().Html;
+        html.Should().Contain("<a href=\"https://apps.apple.com/rs/app/uslu%C5%BEionica/id1234567890?l=sr&amp;mt=8\"")
+            .And.NotContain("&amp;amp;")
+            .And.NotContain("POPUNI");
+        html.Should().Contain("src=\"https://test.usluzionica.rs/mejl/app-store-hr.png?v=2\"")
+            .And.Contain("src=\"https://test.usluzionica.rs/mejl/logo.png?v=2\"")
+            .And.Contain("name=\"color-scheme\" content=\"light dark\"")
+            .And.Contain("prefers-color-scheme: dark");
+    }
+
+    [Theory]
+    [InlineData("/mejl/app-store-hr.png")]
+    [InlineData("/mejl/logo.png")]
+    public async Task SlikeMejla_SeServirajuSaApija(string put)
+    {
+        // Gmail ih vuče sa {App:BaseUrl}/mejl/… — moraju proći kroz UseStaticFiles.
+        var odgovor = await Factory.CreateClient().GetAsync(put);
+
         odgovor.StatusCode.Should().Be(HttpStatusCode.OK);
-        Primaoci().Should().Equal("vlasnik@lista.rs");
-        Email.ListaCekanja.Single().Subject.Should().StartWith("[PROBA]");
-        (await Query(db => db.WaitlistEmails.CountAsync())).Should().Be(0);
+        odgovor.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+        (await odgovor.Content.ReadAsByteArrayAsync()).Length.Should().BeGreaterThan(1000);
+    }
+
+    [Fact]
+    public void Sablon_BezUzvicnikaIEmodzija_PoGlasuBrenda()
+    {
+        var p = new ListaCekanjaMejlSablon.Podaci("a@b.rs", new DateTime(2026, 11, 6), AppStore, null,
+            10m, new DateTime(2027, 1, 5), 2m, 3m, "https://x/odjava", "https://x/mejl");
+        var tekst = ListaCekanjaMejlSablon.Tekst(p) + ListaCekanjaMejlSablon.Naslov(p);
+
+        tekst.Should().NotContain("!");
+        tekst.EnumerateRunes().Should().NotContain(r => r.Value >= 0x1F000);
     }
 }

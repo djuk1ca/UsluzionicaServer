@@ -53,8 +53,31 @@ public sealed class ListaCekanjaMejl(
     /// <summary>Upisani pre ovog datuma dobijaju poruku; vidi <see cref="ListaCekanjaBonus.IzlazakIos"/>.</summary>
     private DateTime? IzlazakIos => bonus.IzlazakIos;
 
-    private string? AppStoreUrl => config["App:AppStoreUrl"] is { Length: > 0 } u ? u.Trim() : null;
-    private string? GooglePlayUrl => config["App:GooglePlayUrl"] is { Length: > 0 } u ? u.Trim() : null;
+    /// <summary>
+    /// App Store link iz konfiguracije, ili null kad nije upisan ili nije
+    /// ispravan apsolutni https link. Null znači: proba i pravo slanje se
+    /// odbijaju, a dry-run pokazuje placeholder uz upozorenje.
+    /// </summary>
+    public string? AppStoreUrl => Proveren(config["App:AppStoreUrl"]);
+    private string? GooglePlayUrl => Proveren(config["App:GooglePlayUrl"]);
+
+    /// <summary>Sirova vrednost je upisana, ali nije ispravan link — za jasniju poruku.</summary>
+    private bool AppStoreNeispravan => !string.IsNullOrWhiteSpace(config["App:AppStoreUrl"]) && AppStoreUrl is null;
+
+    private static string? Proveren(string? url) =>
+        Uri.TryCreate(url?.Trim(), UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps
+            ? u.AbsoluteUri
+            : null;
+
+    /// <summary>Koren slika mejla (logo, bedž) — wwwroot/mejl na API-ju.</summary>
+    private string SlikeUrl => (config["App:BaseUrl"] ?? "").TrimEnd('/') + "/mejl";
+
+    public const string AppStoreNijePodesen =
+        "App:AppStoreUrl nije podešen na serveru: proveri APP_STORE_URL u .env i da docker-compose.prod.yml " +
+        "na serveru mapira App__AppStoreUrl (pa `up -d api`).";
+
+    private const string AppStoreNijeIspravan =
+        "App:AppStoreUrl nije ispravan link: mora biti pun https://apps.apple.com/… link.";
 
     private int Paket   => Math.Max(1, config.GetValue("Waitlist:Email:BatchSize", 20));
     private int Pauza   => Math.Max(0, config.GetValue("Waitlist:Email:PauseSeconds", 60));
@@ -74,6 +97,7 @@ public sealed class ListaCekanjaMejl(
 
     public sealed record Izvestaj(
         bool                 Posalji,
+        string?              AppStoreUrl,
         int                  NaListi,
         int                  Primalaca,
         int                  SaBonusom,
@@ -179,7 +203,8 @@ public sealed class ListaCekanjaMejl(
             BonusRok:         saBonusom ? bonus.Rok(listaPrijave) : null,
             PozivPotvrda:     config.GetValue("Referral:SignupRewardTokens", 2m),
             PozivUslugodavac: config.GetValue("Referral:ProviderActivationRewardTokens", 3m),
-            OdjavaUrl:        OdjavaUrl(hes));
+            OdjavaUrl:        OdjavaUrl(hes),
+            SlikeUrl:         SlikeUrl);
     }
 
     private MejlListeCekanja Poruka(string adresa, string hes, ListaCekanja.Prijava? prijava, bool saBonusom)
@@ -259,7 +284,8 @@ public sealed class ListaCekanjaMejl(
         if (lista.Putanja is null)
             blokade.Add("Waitlist:Path nije podešen — server ne vidi listu čekanja.");
         if (AppStoreUrl is null)
-            blokade.Add("App:AppStoreUrl nije upisan — u pregledu stoji placeholder.");
+            blokade.Add((AppStoreNeispravan ? AppStoreNijeIspravan : AppStoreNijePodesen) +
+                        " U pregledu stoji placeholder.");
         if (IzlazakIos is null)
             blokade.Add("Waitlist:IosLaunchDate nije upisan — aplikacija još nije označena kao izašla na iOS-u.");
         else if (IzlazakIos > sada)
@@ -383,7 +409,7 @@ public sealed class ListaCekanjaMejl(
 
     private Izvestaj Napravi(bool posalji, int naListi, List<Primalac> primaoci, Preskoceno preskoceno,
                              int poslato, int neuspelo, int preostalo, bool prekinuto, List<string> upozorenja) =>
-        new(posalji, naListi, primaoci.Count,
+        new(posalji, AppStoreUrl, naListi, primaoci.Count,
             primaoci.Count(p => p.Bonus), primaoci.Count(p => !p.Bonus),
             primaoci.GroupBy(p => p.Lista).ToDictionary(g => g.Key, g => g.Count()),
             preskoceno, poslato, neuspelo, preostalo, prekinuto, upozorenja,
@@ -398,6 +424,11 @@ public sealed class ListaCekanjaMejl(
     /// </summary>
     public async Task<string> ProbaAsync(string adresa, bool saBonusom = true)
     {
+        // Proba ide u pravi inboks — sa placeholder linkom bi dugme vodilo na
+        // „Cannot Connect" i proba ne bi ništa dokazala.
+        if (AppStoreUrl is null)
+            throw new Odbijeno(AppStoreNeispravan ? AppStoreNijeIspravan : AppStoreNijePodesen);
+
         var norm = ListaCekanja.Normalizuj(adresa);
         if (norm is null || !System.Net.Mail.MailAddress.TryCreate(norm, out _))
             throw new Odbijeno("Neispravna adresa za probno slanje.");
