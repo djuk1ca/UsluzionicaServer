@@ -63,7 +63,7 @@ public sealed class JobOdrzavanje(
             if (oznaceno == 1)
                 await notifications.SendAsync(j.AuthorId, NotificationKind.JobExpired,
                     "Posao je istekao",
-                    $"„{j.Title}“ je istekao. Produži ga u narednih {pravila.CekanjeIsteklog} dana — javljanja su sačuvana.",
+                    $"„{j.Title}“ je istekao. Produži ga u narednih {pravila.CekanjeIsteklog} dana — prijave su sačuvane.",
                     j.Id);
         }
 

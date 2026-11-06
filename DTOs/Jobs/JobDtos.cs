@@ -157,7 +157,7 @@ public sealed class ForYouItemDto
     public string? SubjectUserId { get; set; }
 }
 
-/// <summary>Javio sam se — kartica posla sa stanjem mog javljanja.</summary>
+/// <summary>Prijavio sam se — kartica posla sa stanjem moje prijave.</summary>
 public sealed class AppliedJobDto
 {
     public JobDto           Job         { get; set; } = new();
