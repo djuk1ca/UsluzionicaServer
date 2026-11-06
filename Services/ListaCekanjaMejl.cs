@@ -435,9 +435,12 @@ public sealed class ListaCekanjaMejl(
 
         var prijava = lista.Nadji(norm);
         var poruka  = Poruka(norm, ListaCekanja.Hes(norm), prijava, saBonusom);
-        await email.SendListaCekanjaAsync(poruka with { Subject = "[PROBA] " + poruka.Subject });
+        // Vraća se naslov koji je STVARNO otišao (sa „[PROBA]"), da Admin → Alati
+        // prikaže isto što je u inboksu.
+        var proba = poruka with { Subject = "[PROBA] " + poruka.Subject };
+        await email.SendListaCekanjaAsync(proba);
 
         logger.LogInformation("Mejl listi čekanja: probna poruka poslata.");
-        return poruka.Subject;
+        return proba.Subject;
     }
 }
