@@ -26,6 +26,14 @@
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# Samo kao `deploy` — kao i cron. Kao root nema ključa za Storage Box
+# (/home/deploy/.ssh/storagebox), a fajlovi baze koje bi napravio ostali bi
+# root-ovi i nečitljivi, pa bi i SLEDEĆI noćni backup pao na rsync-u.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Pokreni kao deploy, ne kao root:  su - deploy   pa ponovo $0" >&2
+  exit 1
+fi
+
 DIR=/opt/usluzionica
 BACKUP_DIR="$DIR/backups"
 KEEP_DAYS=3

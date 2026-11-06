@@ -21,6 +21,13 @@
 # ═══════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+# Samo kao `deploy`: pre brisanja pravi backup (backup.sh), a on radi samo
+# kao deploy — kao root bi pao na rsync-u i brisanje se ne bi ni izvršilo.
+if [ "$(id -u)" -eq 0 ]; then
+  echo "Pokreni kao deploy, ne kao root:  su - deploy   pa ponovo $0" >&2
+  exit 1
+fi
+
 DIR=/opt/usluzionica
 DB_NAME=UsluzionicaDB
 UPLOADS_VOLUME=usluzionica_uploads
