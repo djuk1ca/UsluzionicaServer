@@ -76,3 +76,15 @@ public sealed class GrantTokensDto
     [System.ComponentModel.DataAnnotations.MaxLength(300)]
     public string? Note { get; init; }
 }
+
+/// <summary>Probna poruka listi čekanja — vidi AdminController.LaunchEmailTest.</summary>
+public sealed class LaunchEmailTestDto
+{
+    [System.ComponentModel.DataAnnotations.Required]
+    [System.ComponentModel.DataAnnotations.EmailAddress]
+    [System.ComponentModel.DataAnnotations.MaxLength(160)]
+    public string Email { get; init; } = string.Empty;
+
+    /// <summary>true = verzija sa bonusom (podrazumevano), false = bez bonusa.</summary>
+    public bool SaBonusom { get; init; } = true;
+}

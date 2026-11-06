@@ -83,8 +83,11 @@ public sealed class ListaCekanjaBonus(
         return Android;
     }
 
-    /// <summary>Da li prijava SADA donosi bonus po pravilima svoje liste.</summary>
-    private bool Vazi(ListaCekanja.Prijava p, DateTime sada)
+    /// <summary>
+    /// Da li prijava SADA donosi bonus po pravilima svoje liste. Javno jer mejl
+    /// listi čekanja (ListaCekanjaMejl) bonus pominje samo kad ovo važi.
+    /// </summary>
+    public bool Vazi(ListaCekanja.Prijava p, DateTime sada)
     {
         var l = ListaZa(p);
         if (Izlazak(l) is { } izlazak && p.Kreirano > izlazak) return false;   // upis posle izlaska

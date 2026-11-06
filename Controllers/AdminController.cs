@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Admin;
 using UsluzionicaServer.DTOs.Moderation;
@@ -162,6 +163,62 @@ public sealed class AdminController(
     {
         var isplaceno = await bonus.ProdjiAsync(HttpContext.RequestAborted);
         return Ok(new { success = true, data = new { isplaceno } });
+    }
+
+    /// <summary>
+    /// Mejl „Uslužionica je na App Store-u" svima sa liste čekanja.
+    ///
+    /// PODRAZUMEVANO JE DRY-RUN: bez <c>posalji=true</c> ne odlazi nijedna
+    /// poruka — vraća se broj primalaca, šta se preskače i zašto, i pregled
+    /// mejla (naslov, HTML, tekst). Nijedna adresa se ne vraća.
+    ///
+    /// Pravo slanje: <c>posalji=true</c>. Šalje najviše <c>max</c> poruka
+    /// (podrazumevano Waitlist:Email:MaxPerRun), u paketima sa pauzom; ponovno
+    /// pokretanje nastavlja gde je stalo i nikome ne šalje dvaput. Detalji i
+    /// pravila: <see cref="ListaCekanjaMejl"/>.
+    /// </summary>
+    [HttpPost("waitlist/launch-email")]
+    [EnableRateLimiting("admin-mail")]
+    public async Task<IActionResult> LaunchEmail(
+        [FromServices] ListaCekanjaMejl mejl,
+        [FromQuery] bool    posalji        = false,
+        [FromQuery] string? lista          = null,
+        [FromQuery] int?    max            = null,
+        [FromQuery] bool    ponoviNeuspele = false)
+    {
+        try
+        {
+            var izvestaj = await mejl.PokreniAsync(
+                new ListaCekanjaMejl.Opcije(posalji, string.IsNullOrWhiteSpace(lista) ? null : lista.Trim().ToLowerInvariant(),
+                                            max, ponoviNeuspele),
+                HttpContext.RequestAborted);
+            return Ok(new { success = true, data = izvestaj });
+        }
+        catch (ListaCekanjaMejl.Odbijeno ex)
+        {
+            return Conflict(new { success = false, message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Probna poruka na JEDNU adresu (npr. svoju), da se mejl vidi u pravom
+    /// inboksu pre slanja listi. Ne računa se kao poslato.
+    /// </summary>
+    [HttpPost("waitlist/launch-email/test")]
+    [EnableRateLimiting("admin-mail")]
+    public async Task<IActionResult> LaunchEmailTest(
+        [FromServices] ListaCekanjaMejl mejl,
+        [FromBody] LaunchEmailTestDto dto)
+    {
+        try
+        {
+            var naslov = await mejl.ProbaAsync(dto.Email, dto.SaBonusom);
+            return Ok(new { success = true, data = new { naslov } });
+        }
+        catch (ListaCekanjaMejl.Odbijeno ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
     }
 
     // ── ANALITIKA ──────────────────────────────────────────────────────────
