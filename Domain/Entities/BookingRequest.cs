@@ -26,5 +26,6 @@ public class BookingRequest
     public ApplicationUser   Client           { get; set; } = null!;
     public ApplicationUser   Provider         { get; set; } = null!;
     public ServiceExecution? ServiceExecution { get; set; }
-    public Review?           Review           { get; set; }
+    /// <summary>Do dve ocene — klijent uslugodavca i uslugodavac klijenta.</summary>
+    public ICollection<Review> Reviews        { get; set; } = [];
 }

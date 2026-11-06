@@ -37,7 +37,10 @@ public static class SearchIndexBackfill
 
         while (!ct.IsCancellationRequested)
         {
+            // Gradovi ulaze u SearchLocation — bez Include-a bi ih
+            // RefreshSearchIndex dovlačio posebnim upitom za svaki red.
             var batch = await db.Listings
+                .Include(l => l.Cities)
                 .Where(l => l.SearchVersion != version)
                 .OrderBy(l => l.Id)
                 .Take(BatchSize)

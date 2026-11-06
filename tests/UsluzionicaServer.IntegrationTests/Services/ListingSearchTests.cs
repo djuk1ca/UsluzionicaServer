@@ -389,4 +389,157 @@ public class ListingSearchTests(DatabaseFixture fixture) : IntegrationTestBase(f
 
         result.Items.First().Id.Should().Be(najnoviji);
     }
+    // ── Online oglas i više gradova ────────────────────────────────────────
+
+    private Task<(ListingDto? Result, string? Error)> Objavi(
+        string providerId, string title, List<string>? cities, bool? online = null) =>
+        WithService<ListingService, (ListingDto?, string?)>(svc =>
+            svc.CreateAsync(providerId, new CreateListingDto
+            {
+                Title       = title,
+                Description = $"Opis za: {title}",
+                Cities      = cities,
+                IsOnline    = online,
+                CategoryId  = TestData.SeededCategoryId,
+                PriceMode   = UsluzionicaServer.Domain.Enums.PriceMode.Fixed,
+                FixedPrice  = 2000m
+            }));
+
+    private Task<PagedResult<ListingDto>> SearchOnline(string? q, string? city, bool? online) =>
+        WithService<ListingService, PagedResult<ListingDto>>(svc =>
+            svc.SearchAsync(new ListingQueryParams { Q = q, City = city, Online = online, Page = 1, PageSize = 50 }));
+
+    [Fact]
+    public async Task Objava_OnlineBezGrada_Prolazi_ObicanBezGrada_Ne()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("online1@test.rs");
+
+        var (online, greska) = await Objavi(provider.Id, "Časovi engleskog", cities: [], online: true);
+        greska.Should().BeNull();
+        online!.IsOnline.Should().BeTrue();
+        online.Cities.Should().BeEmpty();
+        // Stari klijenti čitaju samo Location — ne sme biti prazno mesto.
+        online.Location.Should().Be("Online");
+
+        var (_, greska2) = await Objavi(provider.Id, "Moler", cities: []);
+        greska2.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Objava_Gradovi_SaListe_BezDuplikata_UPisanjuListe()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("gradovi1@test.rs");
+
+        var (oglas, greska) = await Objavi(provider.Id, "Električar",
+            cities: ["novi sad", "Čačak", "Novi Sad", "CACAK"]);
+
+        greska.Should().BeNull();
+        oglas!.Cities.Should().Equal("Novi Sad", "Čačak");
+        oglas.Location.Should().Be("Novi Sad");
+    }
+
+    [Fact]
+    public async Task Objava_GradVanListe_IliPrevise_Odbija()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("gradovi2@test.rs");
+
+        var (_, vanListe) = await Objavi(provider.Id, "Moler", cities: ["Gotham"]);
+        vanListe.Should().Contain("Gotham");
+
+        var previse = UsluzionicaServer.Infrastructure.SerbianMunicipalities.All
+            .Take(ListingService.MaxGradova + 1).ToList();
+        var (_, greska) = await Objavi(provider.Id, "Moler", cities: previse);
+        greska.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task FilterGrada_NalaziOglasPoBiloKomGradu()
+    {
+        // Prefiks nad spojenim gradovima bi video samo prvi — zato filter ide
+        // nad tabelom gradova.
+        var (provider, _) = await Data.CreateProviderAsync("gradovi3@test.rs");
+        await Objavi(provider.Id, "Keramičar", cities: ["Subotica", "Čačak"]);
+
+        (await Search(q: null, city: "cacak")).Items.Should().ContainSingle()
+            .Which.Cities.Should().Equal("Subotica", "Čačak");
+        (await Search(q: null, city: "Novi Sad")).Items.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task TekstualniUpit_NalaziOglasPoDrugomGradu()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("gradovi4@test.rs");
+        await Objavi(provider.Id, "Keramičar", cities: ["Subotica", "Čačak"]);
+
+        (await Search("keramicar cacak")).Items.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task OnlineOglas_SeNalaziZaSvakiGrad_SaOznakom()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("online2@test.rs");
+        await Objavi(provider.Id, "Prevodi sa nemačkog", cities: [], online: true);
+        await Objavi(provider.Id, "Moler", cities: ["Subotica"]);
+
+        var result = await Search(q: null, city: "Čačak");
+
+        result.Items.Should().ContainSingle()
+              .Which.IsOnline.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task SamoOnline_VracaSamoOnlineOglase()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("online3@test.rs");
+        var online = (await Objavi(provider.Id, "Časovi gitare", cities: ["Novi Sad"], online: true)).Result!;
+        await Objavi(provider.Id, "Časovi klavira", cities: ["Novi Sad"]);
+
+        (await SearchOnline(q: null, city: null, online: true)).Items
+            .Should().ContainSingle().Which.Id.Should().Be(online.Id);
+
+        // online=false NIJE „samo uživo" — stari linkovi ne smeju da sakriju deo rezultata.
+        (await SearchOnline(q: null, city: null, online: false)).Items.Should().HaveCount(2);
+
+        // Online oglas sa gradom ostaje i u običnoj pretrazi tog grada.
+        (await SearchOnline(q: "casovi", city: "Novi Sad", online: null)).Items.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task TekstualniUpit_Online_NalaziOnlineOglas_LatinicomICirilicom()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("online4@test.rs");
+        await Objavi(provider.Id, "Časovi matematike", cities: [], online: true);
+        await Objavi(provider.Id, "Časovi fizike", cities: ["Subotica"]);
+
+        (await Search("casovi online")).Items.Should().ContainSingle()
+            .Which.Title.Should().Be("Časovi matematike");
+        (await Search("часови онлајн")).Items.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task IzmenaIzStareAplikacije_BezGradova_NeBriseOstaleGradove()
+    {
+        // Stara aplikacija šalje samo Location (prvi grad) i ne zna za IsOnline.
+        var (provider, _) = await Data.CreateProviderAsync("stari@test.rs");
+        var oglas = (await Objavi(provider.Id, "Vodoinstalater",
+            cities: ["Subotica", "Čačak"], online: true)).Result!;
+
+        await WithService<ListingService>(async svc =>
+        {
+            var (ok, err) = await svc.UpdateAsync(oglas.Id, provider.Id, new UpdateListingDto
+            {
+                Title       = "Vodoinstalater 0-24",
+                Description = "Opis",
+                Location    = "Subotica",
+                CategoryId  = TestData.SeededCategoryId,
+                PriceMode   = UsluzionicaServer.Domain.Enums.PriceMode.Fixed,
+                FixedPrice  = 1500m
+            });
+            ok.Should().BeTrue(err);
+        });
+
+        var posle = (await Search(q: null, city: "cacak")).Items.Should().ContainSingle().Subject;
+        posle.Cities.Should().Equal("Subotica", "Čačak");
+        posle.IsOnline.Should().BeTrue();
+    }
 }

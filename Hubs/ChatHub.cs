@@ -21,9 +21,8 @@ namespace UsluzionicaServer.Hubs;
 [Authorize]
 public sealed class ChatHub(
     AppDbContext        db,
-    MessageEncryption   encryption,
     OnlineTracker       tracker,
-    NotificationService notificationService,
+    ChatSender          chatSender,
     BlockService        blockService,
     ILogger<ChatHub>    logger) : Hub
 {
@@ -155,66 +154,13 @@ public sealed class ChatHub(
             return;
         }
 
-        // Enkriptuj pre snimanja u bazu
-        var encrypted = encryption.Encrypt(text.Trim(), conversationId);
-
-        var message = new Message
-        {
-            ConversationId = conversationId,
-            SenderId       = senderId,
-            Text           = encrypted,
-            SentAt         = DateTime.UtcNow,
-            IsRead         = false
-        };
-
-        db.Messages.Add(message);
-        conv.LastMessageAt = message.SentAt;
-
-        var preview = text.Length > 60 ? text[..60] + "…" : text;
-
-        await db.SaveChangesAsync();
-
-        // In-app notifikacija (kratak preview, nešifrovano) + SignalR push
-        await notificationService.SendAsync(
-            receiverId,
-            NotificationKind.NewMessage,
-            $"Nova poruka od {sender.FullName}",
-            preview,
-            conversationId);
-
-        // DTO sa DEKRIPTOVANIM tekstom — klijenti nikad ne vide šifrovani tekst
-        var dto = new MessageDto
-        {
-            Id             = message.Id,
-            ConversationId = conversationId,
-            SenderId       = senderId,
-            SenderName     = sender.FullName,
-            SenderImageUrl = sender.ProfileImageUrl,
-            Text           = text.Trim(), // originalni tekst (već imamo ga, ne trebamo decrypt)
-            SentAt         = message.SentAt,
-            IsRead         = false
-        };
-
-        // Broadcast svima u sobi konverzacije (uključuje i pošiljaoca ako ga ima)
-        await Clients
-            .Group(ConvGroup(conversationId))
-            .SendAsync("ReceiveMessage", dto);
-
-        // Ako primalac NIJE u sobi konverzacije (možda ima hub otvoren ali nije joinovao),
-        // pošalji mu na ličnu grupu — da može ažurirati inbox
-        await Clients
-            .Group(UserGroup(receiverId))
-            .SendAsync("NewInboxMessage", new
-            {
-                ConversationId = conversationId,
-                SenderId       = senderId,
-                SenderName     = sender.FullName,
-                Preview        = preview
-            });
+        // Upis, obaveštenje i razglašavanje — zajedničko sa REST-om i
+        // javljanjem na posao (vidi ChatSender).
+        var dto = await chatSender.PosaljiAsync(conv, sender, text);
 
         logger.LogDebug(
             "Poruka {MsgId} poslata u konverzaciji {CId} od {SenderId}",
-            message.Id, conversationId, senderId);
+            dto.Id, conversationId, senderId);
     }
 
     // ── TYPING INDICATOR ───────────────────────────────────────────────────
@@ -237,8 +183,8 @@ public sealed class ChatHub(
         Context.User?.FindFirstValue(ClaimTypes.NameIdentifier)
         ?? throw new HubException("Korisnik nije autentifikovan.");
 
-    private static string UserGroup(string userId)       => $"user-{userId}";
-    private static string ConvGroup(int conversationId)  => $"conversation-{conversationId}";
+    private static string UserGroup(string userId)      => ChatSender.UserGroup(userId);
+    private static string ConvGroup(int conversationId) => ChatSender.ConvGroup(conversationId);
 
     /// <summary>
     /// Vraća userId-ove svih korisnika sa kojima ovaj korisnik ima konverzaciju.

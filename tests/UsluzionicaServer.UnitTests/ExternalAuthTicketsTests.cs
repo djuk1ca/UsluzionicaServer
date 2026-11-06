@@ -77,6 +77,31 @@ public class ExternalAuthTicketsTests
     }
 
     [Fact]
+    public void State_StaroBezKlijenta_IdaljeSeCita()
+    {
+        // State izdat pre polja Client (prijava započeta pre deploya) mora da
+        // prođe — Client je tada null, pa povratak ide u aplikaciju kao ranije.
+        var dp  = new EphemeralDataProtectionProvider();
+        var sut = new ExternalAuthTickets(dp);
+        var staro = dp.CreateProtector("ExternalAuth.State.v1").ToTimeLimitedDataProtector()
+            .Protect("""{"Provider":"google","Challenge":"ch","ReferralCode":null}""", TimeSpan.FromMinutes(5));
+
+        var st = sut.UnprotectState(staro);
+
+        st.Should().NotBeNull();
+        st!.Provider.Should().Be("google");
+        st.Client.Should().BeNull();
+    }
+
+    [Fact]
+    public void State_KlijentPrezivljavaPutNazad()
+    {
+        var sut = CreateSut();
+
+        sut.UnprotectState(sut.ProtectState(new("google", "ch", null, "web")))!.Client.Should().Be("web");
+    }
+
+    [Fact]
     public void State_NeMozeDaSePodmetneKaoRezultat()
     {
         // Oba se potpisuju istim ključevima. Da svrha nije različita, `state`

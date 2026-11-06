@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
 using UsluzionicaServer.DTOs.Listings;
+using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Infrastructure.Search;
 using UsluzionicaServer.Persistence;
@@ -96,6 +97,7 @@ public sealed class ListingService(
             .AsNoTracking()
             .Include(l => l.Category)
             .Include(l => l.Images)
+            .Include(l => l.Cities)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             .Where(l => l.Status == ListingStatus.Active)
@@ -141,6 +143,10 @@ public sealed class ListingService(
                 query = query.Where(l => categoryIds.Contains(l.CategoryId));
         }
 
+        // Samo online — filter „Samo online" u pretrazi.
+        if (p.Online == true)
+            query = query.Where(l => l.IsOnline);
+
         // Filter po gradu — sada nad foldovanom kolonom.
         // Ranije je bilo `l.Location == city`, tačna jednakost: „cacak" nije
         // nalazilo „Čačak", a „beograd" nije nalazilo „Beograd — Vračar".
@@ -152,7 +158,16 @@ public sealed class ListingService(
             if (city.Length > 0)
             {
                 var pattern = SearchNormalizer.EscapeLike(city) + "%";
-                query = query.Where(l => EF.Functions.Like(l.SearchLocation, pattern, LikeEscape));
+
+                // Oglas prolazi ako se BILO KOJI njegov grad poklapa — zato
+                // nad ListingCity.SearchCity, a ne nad SearchLocation, gde su
+                // gradovi spojeni i prefiks bi video samo prvi.
+                //
+                // Online oglas prolazi za svaki grad: usluga na daljinu je
+                // dostupna i tamo. Klijent ga razlikuje po IsOnline (oznaka).
+                query = query.Where(l =>
+                    l.IsOnline ||
+                    l.Cities.Any(c => EF.Functions.Like(c.SearchCity, pattern, LikeEscape)));
             }
         }
 
@@ -458,6 +473,7 @@ public sealed class ListingService(
         var listing = await db.Listings
             .Include(l => l.Category)
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
+            .Include(l => l.Cities)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             .FirstOrDefaultAsync(l => l.Id == id && l.Status != ListingStatus.Archived);
@@ -500,6 +516,140 @@ public sealed class ListingService(
         return MapToDto(listing);
     }
 
+    // ── SIMILAR (javno, „Preporučeni oglasi") ──────────────────────────────
+
+    /// <summary>Podrazumevan broj preporuka — red od 8 kartica na dnu detalja.</summary>
+    public const int SimilarDefaultTake = 8;
+
+    /// <summary>Gornja granica — sekcija je dodatak stranici, ne druga pretraga.</summary>
+    public const int SimilarMaxTake = 20;
+
+    /// <summary>
+    /// Oglasi slični datom, za sekciju „Preporučeni oglasi" na dnu detalja.
+    /// Vraća null ako izvorni oglas za ovog gledaoca ne postoji — isti uslovi
+    /// kao <see cref="GetByIdAsync"/>, da preporuke ne otkriju oglas koji
+    /// detalj krije.
+    ///
+    /// Kandidati prolaze kroz isti <see cref="BuildBaseQueryAsync"/> kao
+    /// pretraga: samo aktivni, bez ugašenih naloga, bez blokiranih u oba smera.
+    ///
+    /// Dva kruga:
+    ///   1. Ista kategorija kao izvorni oglas.
+    ///   2. Ako ih je manje od <paramref name="take"/> — dopuna iz srodnih:
+    ///      sestrinske podkategorije i sam roditelj; za oglas u roditeljskoj
+    ///      kategoriji, njene podkategorije.
+    /// Prvi krug uvek ide ispred drugog, bez obzira na boost — oglas iz tačno
+    /// iste kategorije je bolja preporuka od istaknutog iz susedne.
+    ///
+    /// Unutar kruga: istaknuti (boost nije istekao) pa BoostScore, zatim isti
+    /// grad kao izvorni oglas, pa ocena uslugodavca, pa noviji.
+    /// </summary>
+    public async Task<List<ListingDto>?> GetSimilarAsync(
+        int id, int take = SimilarDefaultTake, string? viewerUserId = null)
+    {
+        take = Math.Clamp(take, 1, SimilarMaxTake);
+
+        var izvor = await db.Listings
+            .AsNoTracking()
+            .Where(l => l.Id == id && l.Status != ListingStatus.Archived)
+            .Select(l => new
+            {
+                l.CategoryId,
+                l.Category.ParentId,
+                l.Location,
+                VlasnikId     = l.ProviderProfile.UserId,
+                VlasnikAktivan = l.ProviderProfile.User.IsActive
+            })
+            .FirstOrDefaultAsync();
+
+        if (izvor is null) return null;
+
+        // Isti uslovi skrivanja kao GetByIdAsync, ali bez uvećavanja ViewCount.
+        if (!izvor.VlasnikAktivan && viewerUserId != izvor.VlasnikId)
+            return null;
+
+        if (viewerUserId is not null && viewerUserId != izvor.VlasnikId)
+        {
+            var blokirano = await db.UserBlocks.AnyAsync(ub =>
+                (ub.BlockerId == viewerUserId    && ub.BlockedId == izvor.VlasnikId) ||
+                (ub.BlockerId == izvor.VlasnikId && ub.BlockedId == viewerUserId));
+
+            if (blokirano) return null;
+        }
+
+        var kandidati = (await BuildBaseQueryAsync(new ListingQueryParams { ViewerUserId = viewerUserId }))
+            .Where(l => l.Id != id)
+            // Uklonjen oglas je već arhiviran (ReportService), pa ga Status
+            // gore ionako sakriva. Ovo je druga brana, kao IsActive vlasnika.
+            .Where(l => l.ModerationState != ModerationState.Removed);
+
+        var grad    = GradIzLokacije(izvor.Location);
+        var sada    = DateTime.UtcNow;
+
+        var rezultat = await UzmiSlicneAsync(
+            kandidati.Where(l => l.CategoryId == izvor.CategoryId), grad, sada, take);
+
+        if (rezultat.Count < take)
+        {
+            // Srodne kategorije: za podkategoriju — braća i roditelj, za
+            // roditelja — njegova deca. Lista je mala (najviše dvadesetak id-eva).
+            var roditeljId = izvor.ParentId ?? izvor.CategoryId;
+            var srodne = await db.Categories
+                .Where(c => (c.ParentId == roditeljId || c.Id == roditeljId) && c.Id != izvor.CategoryId)
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            // Izvorna kategorija je isključena iz srodnih, pa se krugovi ne
+            // preklapaju i nema duplikata.
+            if (srodne.Count > 0)
+                rezultat.AddRange(await UzmiSlicneAsync(
+                    kandidati.Where(l => srodne.Contains(l.CategoryId)),
+                    grad, sada, take - rezultat.Count));
+        }
+
+        var dtos = rezultat.Select(MapToDto).ToList();
+        await StampFavoritesAsync(dtos, viewerUserId);
+        return dtos;
+    }
+
+    /// <summary>Jedan krug preporuka — redosled je opisan na <see cref="GetSimilarAsync"/>.</summary>
+    private static Task<List<Listing>> UzmiSlicneAsync(
+        IQueryable<Listing> query, string grad, DateTime sada, int take)
+    {
+        // Isti grad: tačno poklapanje ili grad + opština ("beograd vracar").
+        // Razmak posle grada je namerno deo obrasca — bez njega bi „novi"
+        // hvatao i „novi sad" i „novi pazar".
+        var gradObrazac = SearchNormalizer.EscapeLike(grad) + " %";
+
+        return query
+            // Istaknut = zastavica I neistekao rok, kao u „Istaknuto" na
+            // početnoj — BoostExpiryService gasi zastavicu tek jednom na sat.
+            .OrderByDescending(l => l.IsBoosted && (l.BoostExpiresAt == null || l.BoostExpiresAt > sada))
+            // BoostScore samo među istaknutima: kod ostalih može ostati
+            // zaostala vrednost do sledećeg prolaza BoostExpiryService-a.
+            .ThenByDescending(l => l.IsBoosted && (l.BoostExpiresAt == null || l.BoostExpiresAt > sada)
+                ? l.BoostScore : 0m)
+            .ThenByDescending(l => grad != "" &&
+                (l.SearchLocation == grad || EF.Functions.Like(l.SearchLocation, gradObrazac, LikeEscape)))
+            .ThenByDescending(l => l.ProviderProfile.AverageRating)
+            .ThenByDescending(l => l.CreatedAt)
+            .ThenByDescending(l => l.Id)
+            .Take(take)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// Grad iz lokacije oglasa, foldovan: „Beograd — Vračar" → „beograd".
+    /// Seče se PRE foldovanja jer Fold pretvara crtu u razmak, pa se grad
+    /// posle više ne bi razlikovao od opštine.
+    /// </summary>
+    private static string GradIzLokacije(string? lokacija)
+    {
+        if (string.IsNullOrWhiteSpace(lokacija)) return string.Empty;
+        var kraj = lokacija.IndexOfAny(['—', '–', '-', ',', '(']);
+        return SearchNormalizer.Fold(kraj > 0 ? lokacija[..kraj] : lokacija);
+    }
+
     // ── CREATE ─────────────────────────────────────────────────────────────
     /// <summary>
     /// Kreira listing. Korisnik mora imati ProviderProfile.
@@ -524,13 +674,21 @@ public sealed class ListingService(
         var priceError = ValidatePrice(dto.PriceMode, dto.FixedPrice, dto.PriceFrom, dto.PriceTo);
         if (priceError is not null) return (null, priceError);
 
+        var isOnline = dto.IsOnline ?? false;
+        var (gradovi, gradError) = ResolveCities(dto.Cities, dto.Location, isOnline);
+        if (gradError is not null) return (null, gradError);
+
         var listing = new Listing
         {
             ProviderProfileId = provider.Id,
             CategoryId        = dto.CategoryId,
             Title             = dto.Title.Trim(),
             Description       = dto.Description.Trim(),
-            Location          = dto.Location.Trim(),
+            Location          = gradovi.FirstOrDefault() ?? string.Empty,
+            IsOnline          = isOnline,
+            Cities            = gradovi
+                .Select((g, i) => new ListingCity { City = g, SortOrder = i })
+                .ToList(),
             PriceMode         = dto.PriceMode,
             FixedPrice        = dto.FixedPrice,
             PriceFrom         = dto.PriceFrom,
@@ -578,15 +736,45 @@ public sealed class ListingService(
         var priceError = ValidatePrice(dto.PriceMode, dto.FixedPrice, dto.PriceFrom, dto.PriceTo);
         if (priceError is not null) return (false, priceError);
 
+        await db.Entry(listing).Collection(l => l.Cities).LoadAsync();
+        var sadasnji = listing.Cities.OrderBy(c => c.SortOrder).Select(c => c.City).ToList();
+        var isOnline = dto.IsOnline ?? listing.IsOnline;
+
+        // Stari klijent (bez Cities) šalje samo prvi grad, onaj koji je i
+        // dobio u Location. Dok je to i dalje prvi grad, ostali se ne diraju
+        // — inače bi svaka izmena iz stare aplikacije obrisala sve osim prvog.
+        List<string> gradovi;
+        if (dto.Cities is null && sadasnji.Count > 0 &&
+            string.Equals(dto.Location?.Trim(), sadasnji[0], StringComparison.Ordinal))
+        {
+            gradovi = sadasnji;
+        }
+        else
+        {
+            var (novi, gradError) = ResolveCities(dto.Cities, dto.Location, isOnline);
+            if (gradError is not null) return (false, gradError);
+            gradovi = novi;
+        }
+
         listing.Title       = dto.Title.Trim();
         listing.Description = dto.Description.Trim();
-        listing.Location    = dto.Location.Trim();
+        listing.Location    = gradovi.FirstOrDefault() ?? string.Empty;
+        listing.IsOnline    = isOnline;
         listing.CategoryId  = dto.CategoryId;
         listing.PriceMode   = dto.PriceMode;
         listing.FixedPrice  = dto.FixedPrice;
         listing.PriceFrom   = dto.PriceFrom;
         listing.PriceTo     = dto.PriceTo;
         listing.UpdatedAt   = DateTime.UtcNow;
+
+        // Gradovi se menjaju samo kad se spisak stvarno promenio, da obična
+        // izmena naslova ne briše i ponovo upisuje iste redove.
+        if (!gradovi.SequenceEqual(sadasnji, StringComparer.Ordinal))
+        {
+            listing.Cities.Clear();
+            for (var i = 0; i < gradovi.Count; i++)
+                listing.Cities.Add(new ListingCity { City = gradovi[i], SortOrder = i });
+        }
 
         await db.SaveChangesAsync();
         return (true, null);
@@ -852,6 +1040,77 @@ public sealed class ListingService(
         return (true, null);
     }
 
+    // ── REORDER IMAGES ─────────────────────────────────────────────────────
+    /// <summary>
+    /// Menja redosled slika oglasa. Prva slika u listi postaje glavna — ona se
+    /// prikazuje na kartici u pretrazi (sve liste sortiraju po SortOrder).
+    ///
+    /// ZAŠTO SE TRAŽI CEO SKUP
+    /// Lista mora sadržati TAČNO sve slike oglasa, svaku jednom. Delimična lista
+    /// („samo pomeri ovu na prvo mesto") bi ostavila ostale sa starim
+    /// SortOrder-om, pa bi dve slike mogle dobiti isti broj i redosled bi
+    /// zavisio od toga kako ih baza vrati. Ceo skup znači da je novo stanje
+    /// potpuno određeno onim što je klijent video na ekranu.
+    ///
+    /// Isto hvata i zastareo ekran: ako je slika u međuvremenu obrisana ili
+    /// dodata sa drugog uređaja, skup se ne poklapa i zahtev se odbija umesto
+    /// da tiho primeni redosled koji niko nije video.
+    ///
+    /// Rupe u SortOrder-u koje ostavlja DeleteImageAsync se ovde zatvaraju —
+    /// upisuje se 0..n-1 po redu iz liste.
+    ///
+    /// Nova slika ne ulazi, pa nema ni nove provere sadržaja: svaka slika je
+    /// prošla ImageModerationGate pri upload-u. Stanje moderacije po slici ne
+    /// postoji — slika u bazi je slika koja se prikazuje, pa je redosled
+    /// uvek nad svim slikama oglasa.
+    /// </summary>
+    /// <returns>
+    /// <c>NijePronadjeno</c> je <c>true</c> kad oglas ne postoji ili nije
+    /// korisnikov (404). Ostale greške su neispravan zahtev (400).
+    /// </returns>
+    public async Task<(List<ListingImageDto>? Result, string? Error, bool NijePronadjeno)> ReorderImagesAsync(
+        int listingId, string userId, IReadOnlyList<int> imageIds)
+    {
+        var listing = await GetOwnedListingAsync(listingId, userId);
+        if (listing is null)
+            return (null, "Listing nije pronađen ili nemate pravo izmene.", true);
+
+        if (listing.Status == ListingStatus.Archived)
+            return (null, ArhiviranPoruka, false);
+
+        // Duplikat se proverava zasebno: {1, 1, 2} prema slikama {1, 2, 3} ima
+        // isti broj elemenata, pa bi samo poređenje broja to propustilo.
+        if (imageIds.Distinct().Count() != imageIds.Count)
+            return (null, "Ista slika se u redosledu ne sme pojaviti dva puta.", false);
+
+        var images = await db.ListingImages
+            .Where(i => i.ListingId == listingId)
+            .ToListAsync();
+
+        var postojece = images.Select(i => i.Id).ToHashSet();
+        if (imageIds.Count != postojece.Count || !postojece.SetEquals(imageIds))
+            return (null,
+                "Redosled mora sadržati tačno sve slike oglasa. " +
+                "Osveži oglas i pokušaj ponovo.", false);
+
+        var poId = images.ToDictionary(i => i.Id);
+        for (var redniBroj = 0; redniBroj < imageIds.Count; redniBroj++)
+            poId[imageIds[redniBroj]].SortOrder = redniBroj;
+
+        listing.UpdatedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        return (images
+            .OrderBy(i => i.SortOrder)
+            .Select(i => new ListingImageDto
+            {
+                Id        = i.Id,
+                ImageUrl  = i.ImageUrl,
+                SortOrder = i.SortOrder
+            })
+            .ToList(), null, false);
+    }
+
     // ── GET BY PROVIDER ────────────────────────────────────────────────────
     public async Task<List<ListingDto>> GetByProviderAsync(string userId)
     {
@@ -859,6 +1118,7 @@ public sealed class ListingService(
             .AsNoTracking()
             .Include(l => l.Category)
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
+            .Include(l => l.Cities)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             // BEZ filtera na status. Ovo je VLASNIKOVA lista, ne javna —
@@ -908,6 +1168,59 @@ public sealed class ListingService(
     private const string ArhiviranPoruka =
         "Oglas je arhiviran. Vrati ga u aktivne da bi ga menjao.";
 
+    /// <summary>Najviše gradova po oglasu. Dovoljno za uslugodavca koji
+    /// pokriva okrug; više od toga je u praksi „cela Srbija", za šta je
+    /// pretraga bez grada.</summary>
+    public const int MaxGradova = 10;
+
+    /// <summary>
+    /// Spisak gradova iz zahteva: sa zvanične liste opština, u njenom pisanju,
+    /// bez duplikata (preklopljeno, pa „Cacak" i „Čačak" su isti grad), redom
+    /// kojim su upisani.
+    ///
+    /// Bar jedan grad je obavezan samo kad oglas NIJE online. Online oglas
+    /// sme da ima i gradove — „online ili uživo u Novom Sadu" je čest slučaj
+    /// kod časova i konsultacija.
+    ///
+    /// Stari klijent šalje samo <paramref name="location"/>; on se tada
+    /// tretira kao spisak od jednog grada.
+    /// </summary>
+    private static (List<string> Gradovi, string? Greska) ResolveCities(
+        List<string>? cities, string? location, bool isOnline)
+    {
+        var unos = cities
+            ?? (string.IsNullOrWhiteSpace(location) ? [] : [location]);
+
+        var gradovi = new List<string>();
+        foreach (var g in unos.Where(g => !string.IsNullOrWhiteSpace(g)))
+        {
+            var zvanican = NormalizujGrad(g);
+            if (zvanican.Length == 0)
+                return ([], $"Grad „{g.Trim()}“ nije na listi opština.");
+
+            if (!gradovi.Contains(zvanican))
+                gradovi.Add(zvanican);
+        }
+
+        if (gradovi.Count > MaxGradova)
+            return ([], $"Oglas može imati najviše {MaxGradova} gradova.");
+
+        if (!isOnline && gradovi.Count == 0)
+            return ([], "Unesi bar jedan grad usluge ili označi da je usluga online.");
+
+        return (gradovi, null);
+    }
+
+    /// <summary>
+    /// Grad sa zvanične liste opština, u njenom pisanju („cacak" → „Čačak").
+    /// Prazno ako nije na listi. Isto pravilo kao JobService.NormalizujGrad.
+    /// </summary>
+    private static string NormalizujGrad(string unos)
+    {
+        var f = SearchNormalizer.Fold(unos);
+        return SerbianMunicipalities.All.FirstOrDefault(g => SearchNormalizer.Fold(g) == f) ?? string.Empty;
+    }
+
     private static string? ValidatePrice(
         PriceMode mode, decimal? fixed_, decimal? from, decimal? to)
     {
@@ -915,20 +1228,41 @@ public sealed class ListingService(
         {
             PriceMode.Fixed      when fixed_ is null or <= 0
                 => "Za fiksu cenu, unesi pozitivan iznos u polju fixedPrice.",
-            PriceMode.Range      when from is null || to is null || from <= 0 || to <= 0
-                => "Za cenovni raspon, unesi priceFrom i priceTo (oba pozitivna).",
-            PriceMode.Range      when from >= to
-                => "priceFrom mora biti manji od priceTo.",
+            // „Do" je opciono: „od 7.000 RSD" je potpuna cena. Ako je upisano,
+            // ne sme biti ispod „od"; isti iznos je dozvoljen i prikazuje se kao jedna cena.
+            PriceMode.Range      when from is null or <= 0
+                => "Za cenovni raspon, unesi pozitivan iznos u polju priceFrom.",
+            PriceMode.Range      when to is <= 0
+                => "priceTo mora biti pozitivan iznos ili prazno.",
+            PriceMode.Range      when to < from
+                => "priceTo ne sme biti manji od priceFrom.",
             _   => null
         };
     }
+
+    /// <summary>
+    /// Gradovi oglasa za DTO. Kad kolekcija nije učitana (ili je red stariji
+    /// od tabele gradova), pada nazad na Location — bolje jedan grad nego
+    /// prazan spisak na kartici.
+    /// </summary>
+    internal static List<string> CitiesOf(Listing l) =>
+        l.Cities is { Count: > 0 }
+            ? l.Cities.OrderBy(c => c.SortOrder).Select(c => c.City).ToList()
+            : string.IsNullOrEmpty(l.Location) ? [] : [l.Location];
+
+    /// <summary>Location za stare klijente: prvi grad, ili „Online" kad
+    /// grada nema — stara aplikacija bi inače prikazala prazno mesto.</summary>
+    internal static string LegacyLocation(Listing l) =>
+        l.Location.Length == 0 && l.IsOnline ? "Online" : l.Location;
 
     private static ListingDto MapToDto(Listing l) => new()
     {
         Id           = l.Id,
         Title        = l.Title,
         Description  = l.Description,
-        Location     = l.Location,
+        Location     = LegacyLocation(l),
+        Cities       = CitiesOf(l),
+        IsOnline     = l.IsOnline,
         PriceMode    = l.PriceMode,
         FixedPrice   = l.FixedPrice,
         PriceFrom    = l.PriceFrom,

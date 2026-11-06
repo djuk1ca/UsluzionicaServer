@@ -14,8 +14,18 @@ public sealed class ListingQueryParams
     /// <summary>Filter po slug-u kategorije (npr. "beauty", "majstori").</summary>
     public string? CategorySlug { get; set; }
 
-    /// <summary>Filter po gradu (mora biti validna srpska opština).</summary>
+    /// <summary>
+    /// Filter po gradu (mora biti validna srpska opština). Online oglasi
+    /// prolaze za SVAKI grad — usluga na daljinu je dostupna i u njemu.
+    /// </summary>
     public string? City         { get; set; }
+
+    /// <summary>
+    /// true = samo online oglasi (filter „Samo online"). false ili izostavljeno
+    /// = bez filtera; NE znači „samo uživo", da stari linki sa `?online=false`
+    /// ne bi sakrili deo rezultata.
+    /// </summary>
+    public bool? Online         { get; set; }
 
     /// <summary>
     /// true = samo istaknuti oglasi kojima boost nije istekao (sekcija

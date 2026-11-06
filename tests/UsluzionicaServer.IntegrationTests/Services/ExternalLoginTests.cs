@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -218,8 +219,34 @@ public class ExternalLoginTests(DatabaseFixture fixture) : IntegrationTestBase(f
 
         var sacuvano = await Query(db => db.Users.Where(u => u.Id == user.Id)
             .Select(u => u.ProfileImageUrl).SingleAsync());
-        sacuvano.Should().Be($"/uploads/avatars/{user.Id}.jpg",
+        sacuvano.Should().StartWith($"/uploads/avatars/{user.Id}-",
             "u bazu ide NAŠA relativna putanja, ne adresa sa Google-a ili Facebook-a");
+        sacuvano.Should().EndWith(".jpg");
+    }
+
+    [Fact]
+    public async Task NovaProfilna_DobijaNovuAdresu_StaraSeBrise()
+    {
+        // Ista adresa za novu sliku znači da klijent prikazuje keširanu staru
+        // (posle isecanja u aplikaciji korisnik vidi stari kadar). Zato svako
+        // slanje dobija novo ime, a stara datoteka ne sme da ostane na disku.
+        var user = await Data.CreateConfirmedUserAsync("ana@test.rs");
+
+        await WithService<UserService>(svc => svc.PostaviAvatarAsync(user.Id, JpegBajtovi()));
+        var prva = await Query(db => db.Users.Where(u => u.Id == user.Id)
+            .Select(u => u.ProfileImageUrl).SingleAsync());
+
+        await WithService<UserService>(svc => svc.PostaviAvatarAsync(user.Id, JpegBajtovi()));
+        var druga = await Query(db => db.Users.Where(u => u.Id == user.Id)
+            .Select(u => u.ProfileImageUrl).SingleAsync());
+
+        druga.Should().NotBe(prva);
+
+        var webRoot = Factory.Services.GetRequiredService<IWebHostEnvironment>().WebRootPath;
+        File.Exists(Path.Join(webRoot, "uploads", "avatars", Path.GetFileName(prva!)))
+            .Should().BeFalse("stara profilna se briše kad nova uspe");
+        File.Exists(Path.Join(webRoot, "uploads", "avatars", Path.GetFileName(druga!)))
+            .Should().BeTrue();
     }
 
     [Fact]

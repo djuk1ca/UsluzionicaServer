@@ -103,4 +103,64 @@ public class SearchIndexMaintenanceTests(DatabaseFixture fixture) : IntegrationT
         listing.SearchTitle.Should().Be("frizerski salon",
             "ćirilica i latinica moraju završiti u istom obliku da bi se mogle unakrsno pretraživati");
     }
+    [Fact]
+    public async Task IzmenaGradova_OsvezavaSearchLocationIGradove()
+    {
+        var (provider, _) = await Data.CreateProviderAsync("indeks.gradovi@test.rs");
+        var listingId = await Data.CreateActiveListingAsync(provider.Id, title: "Moler");
+
+        await WithService<ListingService>(async svc =>
+        {
+            var (ok, err) = await svc.UpdateAsync(listingId, provider.Id, new UpdateListingDto
+            {
+                Title       = "Moler",
+                Description = "Opis",
+                Cities      = ["Čačak", "Novi Sad"],
+                IsOnline    = true,
+                CategoryId  = TestData.SeededCategoryId,
+                PriceMode   = UsluzionicaServer.Domain.Enums.PriceMode.Fixed,
+                FixedPrice  = 1500m
+            });
+            ok.Should().BeTrue(err);
+        });
+
+        var listing = await Query(db => db.Listings.Include(l => l.Cities).SingleAsync(l => l.Id == listingId));
+
+        listing.SearchLocation.Should().Be("cacak novi sad online onlajn");
+        listing.Location.Should().Be("Čačak");
+        listing.Cities.OrderBy(c => c.SortOrder).Select(c => c.SearchCity)
+               .Should().Equal("cacak", "novi sad");
+    }
+
+    [Fact]
+    public async Task PromenaStatusa_BezUcitanihGradova_NeBriseGradoveIzIndeksa()
+    {
+        // UpdateStatusAsync učitava oglas BEZ gradova. Da RefreshSearchIndex
+        // ne dovuče gradove, SearchLocation posle pauze ne bi imao gradove i
+        // oglas se više ne bi nalazio po gradu u tekstu.
+        var (provider, _) = await Data.CreateProviderAsync("indeks.status@test.rs");
+        var listingId = await Data.CreateActiveListingAsync(provider.Id, title: "Moler");
+
+        await WithService<ListingService>(async svc =>
+        {
+            (await svc.UpdateAsync(listingId, provider.Id, new UpdateListingDto
+            {
+                Title       = "Moler",
+                Description = "Opis",
+                Cities      = ["Čačak", "Novi Sad"],
+                CategoryId  = TestData.SeededCategoryId,
+                PriceMode   = UsluzionicaServer.Domain.Enums.PriceMode.Fixed,
+                FixedPrice  = 1500m
+            })).Success.Should().BeTrue();
+        });
+
+        await WithService<ListingService>(async svc =>
+        {
+            (await svc.UpdateStatusAsync(listingId, provider.Id, "Paused")).Success.Should().BeTrue();
+            (await svc.UpdateStatusAsync(listingId, provider.Id, "Active")).Success.Should().BeTrue();
+        });
+
+        var listing = await Query(db => db.Listings.SingleAsync(l => l.Id == listingId));
+        listing.SearchLocation.Should().Be("cacak novi sad");
+    }
 }

@@ -4,5 +4,6 @@ namespace UsluzionicaServer.Domain.Enums;
 public enum ReportTargetType
 {
     Listing,
-    User
+    User,
+    Job
 }

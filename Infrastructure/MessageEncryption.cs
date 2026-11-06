@@ -181,6 +181,21 @@ public sealed class MessageEncryption
     }
 
     /// <summary>Dodatni autentifikovani podaci: poruka pripada TAČNO ovom razgovoru.</summary>
+    /// <summary>Id ključa kojim se trenutno šifruje (k0, k1…).</summary>
+    public string TekuciKljucId => _tekuciId;
+
+    public bool ImaKljuc(string id) => _kljucevi.ContainsKey(id);
+
+    /// <summary>
+    /// Ključ za DRUGU namenu (slike u četu, potpis URL-a), izveden HKDF-om iz
+    /// ključa poruka sa datim id-jem. Kriptografski je nezavisan od ključa
+    /// teksta, rotacija radi isto (nov id → nov izvedeni ključ, stari ostaju
+    /// za čitanje), a deploy ne traži novu tajnu u .env-u.
+    /// </summary>
+    public byte[] IzvedeniKljuc(string keyId, string namena) =>
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, _kljucevi[keyId], outputLength: 32,
+            info: Encoding.UTF8.GetBytes($"usluzionica/{namena}"));
+
     private static byte[] Aad(int conversationId) =>
         Encoding.UTF8.GetBytes($"usluzionica/razgovor/{conversationId}");
 

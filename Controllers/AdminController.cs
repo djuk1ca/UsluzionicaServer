@@ -14,7 +14,8 @@ namespace UsluzionicaServer.Controllers;
 public sealed class AdminController(
     AdminService          adminService,
     ReportService         reportService,
-    UserModerationService userModeration) : ControllerBase
+    UserModerationService userModeration,
+    ChatImageService      chatImages) : ControllerBase
 {
     // ── KORISNICI ──────────────────────────────────────────────────────────
 
@@ -194,9 +195,10 @@ public sealed class AdminController(
     public async Task<IActionResult> GetReportDetails(
         [FromQuery] ReportTargetType targetType,
         [FromQuery] int?             listingId      = null,
-        [FromQuery] string?          reportedUserId = null)
+        [FromQuery] string?          reportedUserId = null,
+        [FromQuery] int?             jobId          = null)
     {
-        var detalji = await reportService.DetaljiAsync(targetType, listingId, reportedUserId);
+        var detalji = await reportService.DetaljiAsync(targetType, listingId, reportedUserId, jobId);
         return Ok(new { success = true, data = detalji });
     }
 
@@ -222,5 +224,21 @@ public sealed class AdminController(
             return BadRequest(new { success = false, message = error });
 
         return Ok(new { success = true });
+    }
+
+    // ── GET /api/admin/messages/{id}/image ────────────────────────────────
+    /// <summary>
+    /// Slika iz prijavljene poruke („Prikaži sliku iz poruke"). Prijava je
+    /// zadržava 30 dana i posle roka od 14; isti dešifrator, bez potpisanog URL-a.
+    /// </summary>
+    [HttpGet("messages/{id:int}/image")]
+    public async Task<IActionResult> GetMessageImage(int id, CancellationToken ct)
+    {
+        var slika = await chatImages.ProcitajZaAdminaAsync(id, ct);
+        if (slika is null) return NotFound(new { success = false, message = "Slika više nije dostupna." });
+
+        Response.Headers.CacheControl = "no-store";
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        return File(slika, ChatImageService.VrstaSadrzaja(slika));
     }
 }

@@ -21,6 +21,11 @@ public sealed class ConversationDto
     /// </summary>
     public int?     OtherProviderProfileId { get; set; }
 
+    /// <summary>Ocena drugog korisnika u ulozi iz <see cref="OtherRatingRole"/> („Provider" | „Client").</summary>
+    public decimal  OtherRating        { get; set; }
+    public int      OtherRatingCount   { get; set; }
+    public string   OtherRatingRole    { get; set; } = "Client";
+
     // Poslednja poruka (tekst skraćen na 80 znakova, za preview)
     public string?  LastMessagePreview { get; set; }
     public DateTime? LastMessageAt     { get; set; }
@@ -42,6 +47,65 @@ public sealed class MessageDto
     public string   Text           { get; set; } = string.Empty; // uvek dekriptovan
     public DateTime SentAt         { get; set; }
     public bool     IsRead         { get; set; }
+
+    /// <summary>
+    /// Vrsta poruke ("Text", "JobApplication"). Stari klijenti polje ignorišu
+    /// i crtaju <see cref="Text"/> kao običan balon — zato je tekst kartice
+    /// uvek i čitljiva rečenica.
+    /// </summary>
+    public string   Kind           { get; set; } = "Text";
+
+    /// <summary>Za karticu javljanja na posao.</summary>
+    public JobCardDto? Job         { get; set; }
+
+    /// <summary>
+    /// Slika (Kind = "Image"). null uz Kind „Image" = slika više nije dostupna
+    /// (istekla, obrisan nalog pošiljaoca).
+    /// </summary>
+    public ChatImageDto? Image     { get; set; }
+
+    /// <summary>
+    /// Opis slike — novi klijenti čitaju ovo, a <see cref="Text"/> nosi
+    /// rezervni tekst za stare („📷 Fotografija — ažuriraj aplikaciju…").
+    /// </summary>
+    public string?  Caption        { get; set; }
+}
+
+/// <summary>Slika u četu — potpisan URL i proporcija za balon.</summary>
+public sealed class ChatImageDto
+{
+    /// <summary>
+    /// Potpisan URL, važi ~sat vremena. Ime se završava na ImageUrl da bi ga
+    /// MediaUrlJsonModifier pretvorio u pun URL.
+    /// </summary>
+    public string ImageUrl    { get; set; } = string.Empty;
+    public int    Width       { get; set; }
+    public int    Height      { get; set; }
+
+    /// <summary>Automatska provera nije sigurna — klijent je prikazuje zamućenu sa „Prikaži".</summary>
+    public bool   NeedsReview { get; set; }
+}
+
+/// <summary>Kartica posla u četu (javljanje).</summary>
+public sealed class JobCardDto
+{
+    /// <summary>null kad posao više ne postoji — kartica piše „Posao više nije dostupan".</summary>
+    public int?     JobId       { get; set; }
+    public string   JobTitle    { get; set; } = string.Empty;
+    public decimal? OfferAmount { get; set; }
+
+    /// <summary>Ime autora posla — za uslugodavčev tekst „… kod Milice".</summary>
+    public string   AuthorName  { get; set; } = string.Empty;
+    public string   AuthorId    { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Stanje SADA, ne u trenutku javljanja — kartica se menja kad autor izabere,
+    /// otkaže ili označi posao kao izvršen. <see cref="JobStatus"/> je null kad
+    /// posao više ne postoji; <see cref="ChosenOther"/> = dogovoren je sa drugim.
+    /// </summary>
+    public string?  JobStatus         { get; set; }
+    public string   ApplicationStatus { get; set; } = string.Empty;
+    public bool     ChosenOther       { get; set; }
 }
 
 /// <summary>Body za kreiranje nove konverzacije.</summary>

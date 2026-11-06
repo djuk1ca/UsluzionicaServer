@@ -409,37 +409,6 @@ public sealed class BookingService(
         return (MapToDto(booking), null);
     }
 
-    // ── NEOCENJENE IZVRŠENE USLUGE ─────────────────────────────────────────
-    /// <summary>
-    /// Izvršene usluge klijenta za koje još nije ostavio recenziju.
-    ///
-    /// Postojanje recenzije se proverava po PARU (autor, oglas), jer je to i
-    /// UNIQUE u bazi — jedna ocena po oglasu. Broje se samo POTVRĐENE ocene:
-    /// ocena ostavljena pre pravila „samo uz izvršenu uslugu" se ne prikazuje,
-    /// pa klijent treba da dobije poziv da je ponovi — ReviewService je tada
-    /// nadograđuje umesto da je odbije kao duplikat.
-    /// </summary>
-    public async Task<List<PendingReviewDto>> GetPendingReviewsAsync(string clientId)
-    {
-        return await db.BookingRequests
-            .AsNoTracking()
-            .Where(b => b.ClientId == clientId
-                     && b.Status   == BookingStatus.Completed
-                     && !db.Reviews.Any(r => r.AuthorId  == clientId
-                                          && r.ListingId == b.ListingId
-                                          && r.BookingRequestId != null))
-            .OrderByDescending(b => b.UpdatedAt)
-            .Select(b => new PendingReviewDto
-            {
-                BookingId    = b.Id,
-                ListingId    = b.ListingId,
-                ListingTitle = b.Listing.Title,
-                ProviderName = b.Provider.FullName,
-                CompletedAt  = b.UpdatedAt
-            })
-            .ToListAsync();
-    }
-
     // ── HELPER ─────────────────────────────────────────────────────────────
     private BookingDto MapToDto(BookingRequest b) => new()
     {
@@ -453,6 +422,8 @@ public sealed class BookingService(
         ClientId       = b.ClientId,
         ClientName     = b.Client?.FullName   ?? string.Empty,
         ClientImageUrl = b.Client?.ProfileImageUrl,
+        ClientRating      = b.Client?.ClientRating ?? 0,
+        ClientReviewCount = b.Client?.ClientReviewCount ?? 0,
         ProviderUserId = b.ProviderUserId,
         ProviderName   = b.Provider?.FullName ?? string.Empty,
         Notes          = b.Notes,

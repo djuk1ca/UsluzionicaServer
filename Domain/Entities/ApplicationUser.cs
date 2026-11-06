@@ -14,6 +14,13 @@ public class ApplicationUser : IdentityUser
     public bool            IsActive        { get; set; } = true;
     public string?         ReferralCode    { get; set; }   // 8-char unique, generisan pri registraciji
 
+    // ── Ocena kao naručilac ────────────────────────────────────────────────
+    // Ocene koje uslugodavci daju korisniku (posle izvršene usluge ili posla).
+    // Preračunava ih ReviewService, kao ProviderProfile.AverageRating — samo
+    // od ocena koje su već vidljive (obostrano ili posle 14 dana).
+    public decimal         ClientRating      { get; set; } = 0m;
+    public int             ClientReviewCount { get; set; } = 0;
+
     // ── Saglasnost sa politikom privatnosti ────────────────────────────────
     // ZZPL (i GDPR čl. 7) traže da rukovalac MOŽE DA DOKAŽE saglasnost.
     // Čekiran box koji nigde ne ostavlja trag to ne dokazuje.

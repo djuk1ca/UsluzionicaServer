@@ -8,7 +8,18 @@ public sealed class ListingDto
     public int          Id               { get; set; }
     public string       Title            { get; set; } = string.Empty;
     public string       Description      { get; set; } = string.Empty;
+    /// <summary>
+    /// Prvi grad, ili „Online" kad je oglas samo online. Za stare klijente i
+    /// javni sajt; novi prikaz čita <see cref="Cities"/> i <see cref="IsOnline"/>.
+    /// </summary>
     public string       Location         { get; set; } = string.Empty;
+
+    /// <summary>Svi gradovi usluge, redom kojim ih je uslugodavac upisao.
+    /// Prazno kod oglasa koji je samo online.</summary>
+    public List<string> Cities           { get; set; } = [];
+
+    /// <summary>Usluga na daljinu. Takav oglas se nalazi za svaki grad.</summary>
+    public bool         IsOnline         { get; set; }
     public PriceMode    PriceMode        { get; set; }
     public decimal?     FixedPrice       { get; set; }
     public decimal?     PriceFrom        { get; set; }

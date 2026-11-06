@@ -62,6 +62,9 @@ public sealed class ExternalRegisterRequest
     /// <summary>Isto pravilo kao u <see cref="RegisterRequest.AcceptedPolicy"/>.</summary>
     public bool AcceptedPolicy { get; set; }
 
+    /// <summary>Isto pravilo kao u <see cref="RegisterRequest.ConfirmedAdult"/>.</summary>
+    public bool? ConfirmedAdult { get; set; }
+
     /// <summary>„Kako si čuo za nas?" — opciono, vidi <c>AcquisitionSources</c>.</summary>
     [StringLength(40)]
     public string? AcquisitionSource { get; set; }

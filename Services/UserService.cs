@@ -7,6 +7,7 @@ using UsluzionicaServer.Infrastructure;
 using UsluzionicaServer.Infrastructure.Apple;
 using UsluzionicaServer.Infrastructure.Media;
 using UsluzionicaServer.Persistence;
+using UsluzionicaServer.Services.Jobs;
 
 namespace UsluzionicaServer.Services;
 
@@ -17,6 +18,9 @@ public sealed class UserService(
     IConfiguration               config,
     ImageModerationGate          imageGate,
     AppleNalog                   appleNalog,
+    JobService                   jobs,
+    JobApplicationService        jobApplications,
+    ChatImageService             chatImages,
     ILogger<UserService>         logger)
 {
     // ── GET profil ─────────────────────────────────────────────────────────
@@ -107,8 +111,15 @@ public sealed class UserService(
         if (!cista)
             return (null, moderationError);
 
-        // Putanja: wwwroot/uploads/avatars/{userId}.{ext}
-        var fileName  = $"{userId}{ext}";
+        // Putanja: wwwroot/uploads/avatars/{userId}-{guid}.{ext}
+        //
+        // NOVO IME PRI SVAKOM SLANJU. Ranije je ime bilo samo {userId}, pa je
+        // nova profilna imala ISTI URL kao stara — WebView i pregledač su
+        // nastavljali da prikazuju keširanu staru sliku, sve do isteka keša.
+        // Sa isecanjem slike u aplikaciji to je postalo očigledno: korisnik
+        // iseče novi kadar, a vidi stari. Novi URL ne može da pogodi keš.
+        var prethodna = user.ProfileImageUrl;
+        var fileName  = $"{userId}-{Guid.NewGuid():N}{ext}";
         var uploadDir = Path.Combine(env.WebRootPath, "uploads", "avatars");
         Directory.CreateDirectory(uploadDir);
 
@@ -120,6 +131,11 @@ public sealed class UserService(
         var relativeUrl = $"/uploads/avatars/{fileName}";
         user.ProfileImageUrl = relativeUrl;
         await userManager.UpdateAsync(user);
+
+        // Stara datoteka se briše tek kad je nova upisana i u bazi — pad
+        // između ta dva koraka ostavlja korisnika sa starom slikom, a ne bez nje.
+        if (prethodna != relativeUrl)
+            TryDeleteAvatarFile(prethodna);
 
         // Ovaj metod vraća URL direktno (ne kroz DTO), pa ga MediaUrlJsonModifier
         // ne dohvata — sastavljamo pun URL ovde da klijent dobije prikazivu vrednost.
@@ -177,6 +193,16 @@ public sealed class UserService(
         await db.Listings
             .Where(l => l.ProviderProfile.UserId == userId && l.Status != ListingStatus.Archived)
             .ExecuteUpdateAsync(s => s.SetProperty(l => l.Status, ListingStatus.Archived));
+
+        // 1a. Poslovi: autorovi se brišu kao „Obriši posao" (javljeni dobijaju
+        //     obaveštenje), javljanja se povlače, a dogovoren posao se vraća
+        //     autoru kao da je izvršilac odustao.
+        await jobs.ObrisiSveAutoroveAsync(userId);
+        await jobApplications.PovuciSveAsync(userId);
+
+        // 1b. Slike koje je poslao u četu — odmah, sa diska i iz baze. Tekst
+        //     poruka ostaje do isteka roka (pošiljalac je „Obrisan nalog").
+        await chatImages.ObrisiPoslateAsync(userId);
 
         // 2. Poništi sve sesije.
         await db.RefreshTokens

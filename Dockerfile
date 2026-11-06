@@ -65,7 +65,8 @@ COPY --from=build /app/publish .
 RUN mkdir -p /app/wwwroot/uploads/avatars \
              /app/wwwroot/uploads/covers \
              /app/wwwroot/uploads/listings \
- && chown -R $APP_UID:$APP_UID /app/wwwroot
+             /app/chat-media \
+ && chown -R $APP_UID:$APP_UID /app/wwwroot /app/chat-media
 
 # ── Non-root ─────────────────────────────────────────────────────────────────
 # .NET 8 slike već sadrže korisnika `app` (UID 1654) izloženog kroz $APP_UID.

@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.DTOs.Auth;
 using UsluzionicaServer.Infrastructure;
+using UsluzionicaServer.Infrastructure.ExternalAuth;
 using UsluzionicaServer.IntegrationTests.Infrastructure;
+using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Services;
 
 namespace UsluzionicaServer.IntegrationTests.Services;
@@ -17,12 +19,13 @@ namespace UsluzionicaServer.IntegrationTests.Services;
 /// </summary>
 public class PolicyConsentTests(DatabaseFixture fixture) : IntegrationTestBase(fixture)
 {
-    private static RegisterRequest Zahtev(bool prihvata) => new()
+    private static RegisterRequest Zahtev(bool prihvata, bool? punoletan = true) => new()
     {
         FullName       = "Test Korisnik",
         Email          = "policy@test.rs",
         Password       = TestData.DefaultPassword,
-        AcceptedPolicy = prihvata
+        AcceptedPolicy = prihvata,
+        ConfirmedAdult = punoletan
     };
 
     [Fact]
@@ -88,5 +91,49 @@ public class PolicyConsentTests(DatabaseFixture fixture) : IntegrationTestBase(f
 
         (await Query(db => db.Users.CountAsync(u => u.Email == "policy@test.rs")))
             .Should().Be(1);
+    }
+
+    // ── Izjava o punoletstvu (verzija 2026-10) ─────────────────────────────
+
+    [Fact]
+    public async Task Registracija_IzricitoNijePunoletan_Odbijena()
+    {
+        var (uspeh, greske) = await WithService<AuthService, (bool, string[])>(
+            svc => svc.RegisterAsync(Zahtev(prihvata: true, punoletan: false)));
+
+        uspeh.Should().BeFalse();
+        greske.Should().ContainSingle().Which.Should().Contain("18+");
+        (await Query(db => db.Users.CountAsync(u => u.Email == "policy@test.rs")))
+            .Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Registracija_StariKlijentBezIzjave_ProlaziSaStarijomVerzijom()
+    {
+        // Verzija aplikacije koja je već u prodavnici ne šalje ConfirmedAdult.
+        // Ne sme da prestane da radi — ali zapis ne sme ni da tvrdi da je
+        // korisnik video izjavu o punoletstvu.
+        var (uspeh, greske) = await WithService<AuthService, (bool, string[])>(
+            svc => svc.RegisterAsync(Zahtev(prihvata: true, punoletan: null)));
+
+        uspeh.Should().BeTrue(string.Join(", ", greske));
+        var korisnik = await Query(db => db.Users.SingleAsync(u => u.Email == "policy@test.rs"));
+        korisnik.PolicyVersionAccepted.Should().Be(PolicyVersion.BezPotvrdeUzrasta);
+        korisnik.PolicyVersionAccepted.Should().NotBe(PolicyVersion.Current);
+    }
+
+    [Fact]
+    public async Task DovrsiNalog_IzricitoNijePunoletan_Odbijeno()
+    {
+        // Isto pravilo i za nalog preko Google-a i Facebook-a.
+        var id = new ExternalIdentity("Google", "google-sub-uzrast", "uzrast@test.rs", EmailVerified: true, Name: "Mali Perica");
+
+        var (user, greska) = await WithService<ExternalLoginService, (ApplicationUser?, string?)>(svc => svc.RegistrujAsync(
+            id,
+            new ExternalRegisterRequest { SignupToken = "x", FullName = "Mali Perica", AcceptedPolicy = true, ConfirmedAdult = false },
+            referralIzPrijave: null));
+
+        user.Should().BeNull();
+        greska.Should().Contain("18+");
     }
 }

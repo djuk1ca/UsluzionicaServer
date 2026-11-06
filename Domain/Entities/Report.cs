@@ -31,6 +31,20 @@ public class Report
     /// <summary>Popunjeno kad je <see cref="TargetType"/> = User.</summary>
     public string? ReportedUserId { get; set; }
 
+    /// <summary>
+    /// Popunjeno kad je <see cref="TargetType"/> = Job. Prijavljen posao se
+    /// ne briše trajno dok prijava postoji (FK je Restrict) — JobCleanupService
+    /// ga preskače, pa admin ima šta da pregleda.
+    /// </summary>
+    public int?    JobId          { get; set; }
+
+    /// <summary>
+    /// Kontekst prijave korisnika iz četa („Prijavi sliku"). Nije zasebna meta —
+    /// prijavljuje se pošiljalac, a ovo pokazuje adminu koju poruku da pogleda.
+    /// SetNull: poruka se briše posle 14 dana, prijava ostaje.
+    /// </summary>
+    public int?    MessageId      { get; set; }
+
     public ReportReason Reason { get; set; }
 
     /// <summary>Slobodna napomena prijavioca. Jedini kontekst kad je razlog „Drugo".</summary>
@@ -49,6 +63,8 @@ public class Report
     // Navigation
     public ApplicationUser  Reporter     { get; set; } = null!;
     public Listing?         Listing      { get; set; }
+    public Job?             Job          { get; set; }
+    public Message?         Message      { get; set; }
     public ApplicationUser? ReportedUser { get; set; }
     public ApplicationUser? ResolvedBy   { get; set; }
 }

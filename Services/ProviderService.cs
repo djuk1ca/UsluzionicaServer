@@ -294,6 +294,7 @@ public sealed class ProviderService(
             .AsNoTracking()
             .Include(l => l.Category)
             .Include(l => l.Images.OrderBy(i => i.SortOrder))
+            .Include(l => l.Cities)
             .Include(l => l.ProviderProfile)
                 .ThenInclude(pp => pp.User)
             .Where(l => l.ProviderProfileId == providerProfileId &&
@@ -323,7 +324,6 @@ public sealed class ProviderService(
         var reviews = await db.Reviews
             .AsNoTracking()
             .Include(r => r.Author)
-            .Include(r => r.Listing)
             .Where(r => EF.Property<int?>(r, "ProviderProfileId") == providerProfileId)
             .OrderByDescending(r => r.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -337,7 +337,7 @@ public sealed class ProviderService(
             AuthorImageUrl = r.Author.ProfileImageUrl,
             Stars          = r.Stars,
             Comment        = r.Comment,
-            ListingTitle   = r.Listing.Title,
+            ListingTitle   = r.ContextTitle,
             CreatedAt      = r.CreatedAt
         }).ToList();
     }
@@ -393,7 +393,9 @@ public sealed class ProviderService(
         Id           = l.Id,
         Title        = l.Title,
         Description  = l.Description,
-        Location     = l.Location,
+        Location     = ListingService.LegacyLocation(l),
+        Cities       = ListingService.CitiesOf(l),
+        IsOnline     = l.IsOnline,
         PriceMode    = l.PriceMode,
         FixedPrice   = l.FixedPrice,
         PriceFrom    = l.PriceFrom,

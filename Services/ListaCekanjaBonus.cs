@@ -156,6 +156,7 @@ public sealed class ListaCekanjaBonus(
                 .Where(u => u.Id == userId)
                 .Select(u => u.TokenBalance)
                 .FirstAsync(ct);
+            db.UskladiBalans(userId, balansPosle);
 
             db.TokenTransactions.Add(new TokenTransaction
             {

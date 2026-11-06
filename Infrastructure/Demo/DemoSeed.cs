@@ -128,8 +128,13 @@ public static class DemoSeed
         // ── Izvršene usluge i ocene ────────────────────────────────────────
         var sada = DateTime.UtcNow;
 
+        // Svaki uslugodavac dobija svoj pomak od par minuta: bez njega dve usluge
+        // istog klijenta imaju identično vreme, pa istorija tokena (sortirana po
+        // CreatedAt) nema stabilan redosled i BalanceAfter lanac se raspadne.
+        var redniBroj = 0;
         foreach (var (opis, provajder, listingId) in napravljeni)
         {
+            var pomakMinuta = 7 * redniBroj++;
             // Jovana ne ocenjuje sopstvene oglase.
             var kandidati = klijenti.Where(k => k.Id != provajder.Id).ToArray();
 
@@ -137,7 +142,7 @@ public static class DemoSeed
             {
                 var (zvezdice, komentar) = opis.Ocene[i];
                 var klijent  = kandidati[(i + opis.Email.Length) % kandidati.Length];
-                var kada     = sada.AddDays(-(6 + i * 9));
+                var kada     = sada.AddDays(-(6 + i * 9)).AddMinutes(-pomakMinuta);
 
                 var booking = new BookingRequest
                 {
@@ -165,9 +170,15 @@ public static class DemoSeed
                     ListingId        = listingId,
                     BookingRequestId = booking.Id,
                     AuthorId         = klijent.Id,
+                    SubjectUserId    = provajder.Id,
+                    SubjectRole      = ReviewRole.Provider,
+                    ContextTitle     = opis.Naslov,
                     Stars            = zvezdice,
                     Comment          = komentar,
-                    CreatedAt        = kada.AddHours(5)
+                    CreatedAt        = kada.AddHours(5),
+                    IsVerified       = true,
+                    PublishedAt      = kada.AddHours(5),
+                    RevealAt         = kada.AddDays(14)
                 });
                 await db.SaveChangesAsync();
 
@@ -604,7 +615,36 @@ public static class DemoSeed
             new(PriceMode.Fixed, Fiksna: 1300), "engleski", 0m,
             [(5, "Posle tri meseca konverzacije mnogo sigurnije pričam na poslu."),
              (5, "Odlična priprema za IELTS, dobila sam ocenu koja mi je trebala."),
-             (4, "Zanimljivi časovi, puno praktičnih primera.")])
+             (4, "Zanimljivi časovi, puno praktičnih primera.")]),
+
+        // Talas 2 marketinga (Instagram personas 11–12): auto mehaničar i detailing.
+        new("vladimir.n@" + Domen, "Vladimir N.", "Auto mehaničar",
+            "Auto mehaničar sa sopstvenom radionicom na Klisi. Servis, kočnice i dijagnostika za sve marke.",
+            120,
+            "Auto mehaničar — mali i veliki servis, kočnice, Klisa",
+            "Šta radim: mali i veliki servis, zamena ulja i filtera, kočnice, trap, zupčasti kaiš i " +
+            "dijagnostika greške računarom. Gde: radionica na Klisi, Novi Sad. Kada: radnim danima od 8 do " +
+            "17h, subotom do 13h. Cena: dijagnostika 2.000 din, mali servis od 4.000 din bez delova, ostalo " +
+            "po proceni. Pre posla kažem tačnu cenu, a stare delove vraćam vlasniku.",
+            new(PriceMode.Range, Od: 2000, Do: 20000), "automehanicar", 0m,
+            [(5, "Unapred rekao koliko će koštati servis i tako je i bilo."),
+             (5, "Dijagnostika i zamena pločica isti dan, vratio mi stare delove."),
+             (4, "Odrađeno kako treba, samo je auto bio gotov sat kasnije nego što smo rekli.")]),
+
+        new("bojan.l@" + Domen, "Bojan L.", "Auto detailing",
+            "Auto detailing: enterijer, poliranje i zaštita laka. Radim u Telepu ili dolazim na adresu.",
+            123,
+            "Auto detailing — dubinsko pranje, poliranje i zaštita laka, Telep",
+            "Šta radim: dubinsko pranje enterijera i hemijsko čišćenje sedišta, poliranje i uklanjanje " +
+            "sitnih ogrebotina, keramička i voštana zaštita laka, pranje motora. Gde: Telep, Novi Sad, ili " +
+            "kod vas sa mobilnom opremom. Kada: utorak–subota od 9 do 18h. Cena: kompletno pranje od 3.000 " +
+            "din, dubinsko pranje enterijera od 6.000 din, poliranje od 15.000 din. Na zahtev slikam auto " +
+            "pre i posle.",
+            new(PriceMode.Range, Od: 3000, Do: 30000), "detailing", 0m,
+            [(5, "Sedišta izgledaju kao nova, fleke od kafe su nestale."),
+             (5, "Posle poliranja lak sija, ogrebotine na vratima se više ne vide."),
+             (5, "Dogovorili smo se u četu, auto gotov tačno kad je rekao."),
+             (4, "Odlično urađen enterijer, cena kao u oglasu.")])
     ];
 
     /// <summary>
