@@ -25,6 +25,11 @@ public abstract class IntegrationTestBase(DatabaseFixture fixture) : IAsyncLifet
         // Slike iz četa — baza je prazna, pa i disk mora biti.
         if (Directory.Exists(Factory.ChatMediaPath))
             Directory.Delete(Factory.ChatMediaPath, recursive: true);
+
+        // Lista čekanja hosta — isto: svaki test počinje od prazne liste, inače
+        // bi brojevi primalaca u jednom testu zavisili od upisa iz drugih.
+        if (File.Exists(Factory.ListaCekanjaPutanja))
+            File.Delete(Factory.ListaCekanjaPutanja);
         Data = new TestData(Factory);
     }
 

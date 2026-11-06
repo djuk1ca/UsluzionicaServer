@@ -34,7 +34,32 @@ public sealed class FakeEmailService : IEmailService
         return Task.CompletedTask;
     }
 
-    public void Clear() => _sent.Clear();
+    // ── Lista čekanja ──────────────────────────────────────────────────────
+
+    private readonly ConcurrentBag<MejlListeCekanja> _listaCekanja = [];
+
+    /// <summary>Cele poruke listi čekanja (naslov, HTML, tekst, odjava).</summary>
+    public IReadOnlyCollection<MejlListeCekanja> ListaCekanja => _listaCekanja;
+
+    /// <summary>Adrese za koje „SMTP" baca — za test neuspelog slanja.</summary>
+    public ConcurrentDictionary<string, bool> PadniZa { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task SendListaCekanjaAsync(MejlListeCekanja mejl)
+    {
+        if (PadniZa.ContainsKey(mejl.To))
+            throw new InvalidOperationException("Lažni SMTP: odbijeno.");
+
+        _listaCekanja.Add(mejl);
+        _sent.Add(new SentEmail("lista-cekanja", mejl.To, "", mejl.OdjavaUrl));
+        return Task.CompletedTask;
+    }
+
+    public void Clear()
+    {
+        _sent.Clear();
+        _listaCekanja.Clear();
+        PadniZa.Clear();
+    }
 
     // ── Pomoćni upiti za testove ───────────────────────────────────────────
 

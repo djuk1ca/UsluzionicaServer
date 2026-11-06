@@ -7,7 +7,7 @@ using UsluzionicaServer.Persistence;
 namespace UsluzionicaServer.Services.Jobs;
 
 /// <summary>
-/// Javljanja i dogovor: javi se, povuci, lista javljanja, izbor izvršioca,
+/// Javljanja i dogovor: prijavi se, otkaži prijavu, lista prijava, izbor izvršioca,
 /// otkazivanje, odustajanje i „Posao je izvršen" (tokeni).
 ///
 /// SVAKI PRELAZ STANJA IDE USLOVNIM UPDATE-om (WHERE Status = očekivano): dva
@@ -26,12 +26,12 @@ public sealed class JobApplicationService(
     // ── JAVI SE ────────────────────────────────────────────────────────────
     /// <summary>
     /// Uslugodavac se javlja. Odmah se otvara razgovor sa autorom i u njemu
-    /// stoji kartica javljanja (odluka 15.10.): autor vidi „Marko se javio na
-    /// posao …", uslugodavac „Javio si se na posao … kod Milice".
+    /// stoji kartica prijave (odluka 15.10.): autor vidi „Marko se prijavio na
+    /// posao …", uslugodavac „Prijavio si se na posao … kod Milice".
     ///
     /// Ponovno javljanje posle povlačenja ili otkazivanja menja ISTI red
     /// (UNIQUE posao + uslugodavac); posle otkazivanja autor ga vidi na vrhu
-    /// liste kao „Ponovo se javio".
+    /// liste kao „Ponovo se prijavio".
     /// </summary>
     public async Task<(MyApplicationDto? Application, int? ConversationId, string? Error)> ApplyAsync(
         int jobId, string providerId, ApplyToJobDto dto)
@@ -41,7 +41,7 @@ public sealed class JobApplicationService(
             return (null, null, "Nalog nije pronađen.");
 
         if (!await db.ProviderProfiles.AnyAsync(p => p.UserId == providerId))
-            return (null, null, "Na poslove se javljaju uslugodavci. Postani uslugodavac da se javiš.");
+            return (null, null, "Na poslove se prijavljuju uslugodavci. Postani uslugodavac da se prijaviš.");
 
         var job = await db.Jobs.Include(j => j.Author)
             .FirstOrDefaultAsync(j => j.Id == jobId);
@@ -52,10 +52,10 @@ public sealed class JobApplicationService(
             return (null, null, "Ovaj posao više nije dostupan.");
 
         if (job.AuthorId == providerId)
-            return (null, null, "Ne možeš se javiti na svoj posao.");
+            return (null, null, "Ne možeš da se prijaviš na svoj posao.");
 
         if (await blokade.JeBlokiranoAsync(providerId, job.AuthorId))
-            return (null, null, "Javljanje na ovaj posao nije moguće.");
+            return (null, null, "Prijava na ovaj posao nije moguća.");
 
         var poruka = dto.Message.Trim();
         if (poruka.Length < 2)
@@ -65,7 +65,7 @@ public sealed class JobApplicationService(
             .FirstOrDefaultAsync(a => a.JobId == jobId && a.ProviderUserId == providerId);
 
         if (prijava is { Status: JobApplicationStatus.Sent or JobApplicationStatus.Chosen })
-            return (null, null, "Već si se javio na ovaj posao.");
+            return (null, null, "Već si se prijavio na ovaj posao.");
 
         if (prijava is null)
         {
@@ -98,7 +98,7 @@ public sealed class JobApplicationService(
         catch (DbUpdateException)
         {
             // Dva istovremena javljanja istog uslugodavca — UNIQUE je pustio jedno.
-            return (null, null, "Već si se javio na ovaj posao.");
+            return (null, null, "Već si se prijavio na ovaj posao.");
         }
 
         // Razgovor + kartica javljanja. Kartica ide BEZ opšteg „Nova poruka" —
@@ -108,8 +108,8 @@ public sealed class JobApplicationService(
         await chat.PosaljiAsync(razgovor, uslugodavac, poruka, MessageKind.JobApplication, prijava, obavesti: false);
 
         await notifications.SendAsync(job.AuthorId, NotificationKind.JobApplicationReceived,
-            "Novo javljanje na posao",
-            $"{uslugodavac.FullName} se javio na „{job.Title}“.",
+            "Nova prijava na posao",
+            $"{uslugodavac.FullName} se prijavio na „{job.Title}“.",
             job.Id);
 
         logger.LogInformation("Javljanje {AppId} na posao {JobId} (uslugodavac {ProviderId}).",
@@ -129,7 +129,7 @@ public sealed class JobApplicationService(
 
         return izmenjeno == 1
             ? (true, null)
-            : (false, "Javljanje ne može da se povuče — možda si već izabran.");
+            : (false, "Prijava ne može da se otkaže — možda si već izabran.");
     }
 
     /// <summary>
@@ -157,7 +157,7 @@ public sealed class JobApplicationService(
     // ── LISTA JAVLJANJA (autor) ────────────────────────────────────────────
     /// <summary>
     /// Javljanja kako ih vidi autor. Otvaranje liste beleži da su viđena
-    /// (nestaje „2 nova"). Redosled: „Ponovo se javio" na vrhu, pa po izboru
+    /// (nestaje „2 nove"). Redosled: „Ponovo se prijavio" na vrhu, pa po izboru
     /// sortiranja; otkazani i odustali na dnu.
     /// </summary>
     public async Task<(List<JobApplicationDto>? Items, string? Error)> ListAsync(
@@ -191,7 +191,7 @@ public sealed class JobApplicationService(
             ConversationId = razgovori.GetValueOrDefault(a.ProviderUserId)
         });
 
-        // Aktivna javljanja prva; među njima „Ponovo se javio" na vrhu.
+        // Aktivna javljanja prva; među njima „Ponovo se prijavio" na vrhu.
         var aktivna = lista.Where(a => a.Status is JobApplicationStatus.Sent or JobApplicationStatus.Chosen);
         aktivna = (sort ?? "newest") switch
         {
@@ -222,7 +222,7 @@ public sealed class JobApplicationService(
 
         var prijava = job.Applications.FirstOrDefault(a => a.Id == applicationId);
         if (prijava is null || prijava.Status != JobApplicationStatus.Sent)
-            return (null, "Ovo javljanje više ne važi.");
+            return (null, "Ova prijava više ne važi.");
 
         if (await blokade.JeBlokiranoAsync(authorId, prijava.ProviderUserId))
             return (null, "Izbor ovog uslugodavca nije moguć.");
@@ -261,7 +261,7 @@ public sealed class JobApplicationService(
         foreach (var drugi in job.Applications.Where(a => a.Id != applicationId && a.Status == JobApplicationStatus.Sent))
             await notifications.SendAsync(drugi.ProviderUserId, NotificationKind.JobNotChosen,
                 "Autor je izabrao drugog",
-                $"Za „{job.Title}“ je izabran drugi uslugodavac. Tvoje javljanje važi ako se posao vrati.",
+                $"Za „{job.Title}“ je izabran drugi uslugodavac. Tvoja prijava važi ako se posao vrati.",
                 job.Id);
 
         logger.LogInformation("Posao {JobId} dogovoren sa javljanjem {AppId}.", jobId, applicationId);
@@ -293,7 +293,7 @@ public sealed class JobApplicationService(
 
             await notifications.SendAsync(izabrana.ProviderUserId, NotificationKind.JobAssignmentCancelled,
                 "Dogovor je otkazan",
-                $"Autor je otkazao dogovor za „{job.Title}“. Možeš ponovo da se javiš.",
+                $"Autor je otkazao dogovor za „{job.Title}“. Možeš ponovo da se prijaviš.",
                 job.Id);
         }
 
@@ -323,7 +323,7 @@ public sealed class JobApplicationService(
         var izvrsilac = await db.Users.AsNoTracking().FirstAsync(u => u.Id == providerId);
         await notifications.SendAsync(job.AuthorId, NotificationKind.JobWorkerQuit,
             "Izvršilac je odustao",
-            $"{izvrsilac.FullName} je odustao — „{job.Title}“ je ponovo aktivan. Ostala javljanja važe.",
+            $"{izvrsilac.FullName} je odustao — „{job.Title}“ je ponovo aktivan. Ostale prijave važe.",
             job.Id);
 
         await JaviOstalimaDaJeOtvorenAsync(job, izabrana.Id);
@@ -435,7 +435,7 @@ public sealed class JobApplicationService(
         foreach (var a in job.Applications.Where(a => a.Id != osimId && a.Status == JobApplicationStatus.Sent))
             await notifications.SendAsync(a.ProviderUserId, NotificationKind.JobReopened,
                 "Posao je ponovo otvoren",
-                $"„{job.Title}“ je ponovo otvoren — tvoje javljanje i dalje važi.",
+                $"„{job.Title}“ je ponovo otvoren — tvoja prijava i dalje važi.",
                 job.Id);
     }
 

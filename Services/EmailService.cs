@@ -40,9 +40,35 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
             subject: "Reset lozinke — Uslužionica",
             html:    BuildPasswordResetHtml(fullName, resetCode));
 
+    /// <summary>
+    /// Mejl listi čekanja. Za razliku od transakcionih, ovo je poruka koja ide
+    /// mnogima odjednom, pa nosi ono što Gmail i Yahoo traže od takvih
+    /// pošiljalaca: tekstualnu verziju uz HTML i odjavu jednim klikom
+    /// (List-Unsubscribe + List-Unsubscribe-Post, RFC 8058). Bez toga ovakav
+    /// mejl lako završi u spamu.
+    /// </summary>
+    public Task SendListaCekanjaAsync(MejlListeCekanja mejl)
+    {
+        var telo = new Multipart("alternative")
+        {
+            new TextPart("plain") { Text = mejl.Text },
+            new TextPart("html")  { Text = mejl.Html }
+        };
+
+        return SendAsync(mejl.To, mejl.Subject, telo, poruka =>
+        {
+            poruka.Headers.Add("List-Unsubscribe", $"<{mejl.OdjavaUrl}>");
+            poruka.Headers.Add("List-Unsubscribe-Post", "List-Unsubscribe=One-Click");
+        });
+    }
+
     // ── Interni helper ─────────────────────────────────────────────────────
 
-    private async Task SendAsync(string to, string subject, string html)
+    private Task SendAsync(string to, string subject, string html)
+        => SendAsync(to, subject, new TextPart("html") { Text = html });
+
+    private async Task SendAsync(string to, string subject, MimeEntity body,
+                                 Action<MimeMessage>? dopuni = null)
     {
         var message = new MimeMessage();
         message.From.Add(new MailboxAddress(_fromName, _from));
@@ -52,7 +78,8 @@ public sealed class EmailService(IConfiguration config, ILogger<EmailService> lo
             message.ReplyTo.Add(MailboxAddress.Parse(_replyTo));
 
         message.Subject = subject;
-        message.Body    = new TextPart("html") { Text = html };
+        message.Body    = body;
+        dopuni?.Invoke(message);
 
         try
         {

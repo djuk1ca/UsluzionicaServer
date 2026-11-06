@@ -40,7 +40,7 @@ public sealed class ChatSender(
     /// </summary>
     /// <param name="obavesti">
     /// false kad pozivalac šalje svoje, preciznije obaveštenje (npr. „Novo
-    /// javljanje na posao" umesto „Nova poruka").
+    /// prijava na posao" umesto „Nova poruka").
     /// </param>
     /// <param name="prilog">
     /// Slika — fajl je već upisan na disk (ChatImageService). Tekst je tada
@@ -161,8 +161,8 @@ public sealed class ChatSender(
     {
         MessageKind.Image => string.IsNullOrWhiteSpace(tekst) ? "📷 Fotografija" : $"📷 {Pregled.Skrati(tekst, 58)}",
         MessageKind.JobApplication => naslovPosla is null
-            ? "Javljanje na posao"
-            : $"Javljanje na posao „{Pregled.Skrati(naslovPosla, 40)}“",
+            ? "Prijava na posao"
+            : $"Prijava na posao „{Pregled.Skrati(naslovPosla, 40)}“",
         _ => Pregled.Skrati(tekst, 60)
     };
 

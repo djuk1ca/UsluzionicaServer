@@ -270,6 +270,12 @@ Every endpoint requires the `Admin` role, applied at controller level.
 | GET | `/api/admin/tokens` |
 | GET | `/api/admin/stats` |
 | GET | `/api/admin/analytics` |
+| GET | `/api/admin/waitlist` |
+| POST | `/api/admin/waitlist/run` |
+| POST | `/api/admin/waitlist/launch-email` |
+| POST | `/api/admin/waitlist/launch-email/test` |
+
+`waitlist/launch-email` sends the "we're on the App Store" email to the waitlist. **It is a dry run unless `posalji=true` is passed**: the dry run returns recipient counts, who is skipped and why, and the rendered email (subject, HTML, text) — never an address. A real run sends at most `max` messages (default `Waitlist:Email:MaxPerRun`) in paced batches, records each recipient before sending so no address is ever emailed twice, skips addresses that already have an account or have unsubscribed, and is refused (409) until `Waitlist:IosLaunchDate` and `App:AppStoreUrl` are set. Optional `lista=ios|android`, `ponoviNeuspele=true`. `launch-email/test` sends one `[PROBA]` copy to a single address and records nothing. Both are rate-limited to 20 per hour per admin. The unsubscribe link in the email is the anonymous `GET`/`POST /api/lista-cekanja/odjava?a=&p=` (signed; POST is RFC 8058 one-click).
 
 User search runs over the folded `SearchName` column, so `milos` finds `Miloš` and `djordje` finds `Đorđe`; email is matched directly since addresses are ASCII anyway. `analytics` takes a `days` parameter for the time series behind the dashboard charts. Granted tokens appear in the ledger as `AdminGrant`, like any other movement.
 
