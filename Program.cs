@@ -638,22 +638,31 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit  = 0
             }));
 
-    // Mejl listi čekanja (dry-run, slanje, proba) — 20 na sat po admin nalogu.
-    // Sama radnja je već iza Admin uloge; ovo je osigurač da skripta u petlji
-    // ili zaglavljen klijent ne pokrenu slanje stotinu puta (svako pravo
-    // pokretanje troši dnevni limit SMTP provajdera).
+    // Mejl listi čekanja — po admin nalogu, DVE kvote:
+    //   • slanje (posalji=true) i proba: 20 na sat — svako troši dnevni limit
+    //     SMTP provajdera; osigurač da skripta u petlji ili zaglavljen klijent
+    //     ne pokrenu slanje stotinu puta;
+    //   • dry-run: 6× više — ne šalje ništa, a Admin → Alati ga zove pri
+    //     svakoj proveri. Sa zajedničkom kvotom bi par klikova na „Proveri"
+    //     potrošio i probu, i proba bi vraćala 429.
+    // Sama radnja je ionako iza Admin uloge.
     options.AddPolicy("admin-mail", httpContext =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            partitionKey: httpContext.User.FindFirst(
-                              System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                          ?? httpContext.Connection.RemoteIpAddress?.ToString()
-                          ?? "unknown",
+    {
+        var salje = httpContext.Request.Path.Value?.EndsWith("/test", StringComparison.OrdinalIgnoreCase) == true
+                 || string.Equals(httpContext.Request.Query["posalji"], "true", StringComparison.OrdinalIgnoreCase);
+        var korisnik = httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                    ?? httpContext.Connection.RemoteIpAddress?.ToString()
+                    ?? "unknown";
+
+        return RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: (salje ? "salje:" : "pregled:") + korisnik,
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = adminMailPermitLimit,
+                PermitLimit = salje ? adminMailPermitLimit : adminMailPermitLimit * 6,
                 Window      = TimeSpan.FromHours(1),
                 QueueLimit  = 0
-            }));
+            });
+    });
 
     options.OnRejected = async (context, ct) =>
     {
