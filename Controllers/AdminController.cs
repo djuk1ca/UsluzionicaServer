@@ -14,6 +14,7 @@ namespace UsluzionicaServer.Controllers;
 [Authorize(Roles = "Admin")]
 public sealed class AdminController(
     AdminService          adminService,
+    BookingService        bookingService,
     ReportService         reportService,
     UserModerationService userModeration,
     ChatImageService      chatImages) : ControllerBase
@@ -65,6 +66,61 @@ public sealed class AdminController(
 
         return Ok(new { success = true, data = new { tokenBalance = newBalance } });
     }
+
+    /// <summary>
+    /// Pouzdan nalog: kad su oba učesnika termina pouzdana, čekanje do
+    /// „Izvršeno" se preskače pri potvrdi. Stanje se šalje eksplicitno (kao kod
+    /// deaktivacije), da dupli klik ne obrne odluku.
+    /// </summary>
+    [HttpPatch("users/{id}/trusted")]
+    public async Task<IActionResult> SetUserTrusted(string id, [FromQuery] bool trusted = true)
+    {
+        if (!await adminService.SetTrustedAsync(id, trusted))
+            return NotFound(new { success = false, message = "Korisnik nije pronađen." });
+
+        return Ok(new { success = true });
+    }
+
+    // ── ZAKAZANI TERMINI: ČEKANJE DO IZVRŠENJA ─────────────────────────────
+
+    /// <summary>
+    /// Potvrđeni termini. <c>waiting=true</c> (podrazumevano) vraća samo one
+    /// kojima „Izvršeno" još nije dozvoljeno.
+    /// </summary>
+    [HttpGet("bookings/confirmed")]
+    public async Task<IActionResult> GetConfirmedBookings(
+        [FromQuery] int  page     = 1,
+        [FromQuery] int  pageSize = 20,
+        [FromQuery] bool waiting  = true)
+    {
+        var (items, total) = await bookingService.GetConfirmedForAdminAsync(page, pageSize, waiting);
+        return Ok(new { success = true, data = items, total, page, pageSize });
+    }
+
+    /// <summary>
+    /// Skida čekanje: uslugodavac može odmah da označi uslugu kao izvršenu.
+    /// Nagrade i ocene ostaju iste; beleži se koji admin je to uradio i kada.
+    /// </summary>
+    [HttpPost("bookings/{id:int}/allow-execute-now")]
+    public async Task<IActionResult> AllowExecuteNow(int id)
+    {
+        var (ok, greska, nePostoji) = await bookingService.SkiniCekanjeAsync(id, AdminId);
+        if (nePostoji) return NotFound(new { success = false, message = greska });
+        if (!ok)       return BadRequest(new { success = false, message = greska });
+        return Ok(new { success = true });
+    }
+
+    /// <summary>Vraća podrazumevano čekanje (poništava allow-execute-now).</summary>
+    [HttpDelete("bookings/{id:int}/allow-execute-now")]
+    public async Task<IActionResult> RestoreExecuteWait(int id)
+    {
+        var (ok, greska, nePostoji) = await bookingService.VratiCekanjeAsync(id, AdminId);
+        if (nePostoji) return NotFound(new { success = false, message = greska });
+        if (!ok)       return BadRequest(new { success = false, message = greska });
+        return Ok(new { success = true });
+    }
+
+    private string AdminId => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
 
     // ── LISTINZI ───────────────────────────────────────────────────────────
 

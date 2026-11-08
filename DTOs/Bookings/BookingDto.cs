@@ -59,6 +59,12 @@ public sealed class BookingDto
     /// Provider može pritisnuti Execute samo kad je CanExecute = true.
     /// </summary>
     public bool CanExecute { get; set; }
+
+    /// <summary>
+    /// Admin je skinuo čekanje (ili su oba učesnika pouzdana) — CanExecuteAt
+    /// tada nije AcceptedAt + ExecuteAfterDays nego trenutak skidanja.
+    /// </summary>
+    public bool ExecuteWaitWaived { get; set; }
 }
 
 /// <summary>

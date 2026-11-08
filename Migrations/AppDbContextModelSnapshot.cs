@@ -207,6 +207,9 @@ namespace UsluzionicaServer.Migrations
                     b.Property<bool>("IsProvider")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsTrusted")
+                        .HasColumnType("bit");
+
                     b.Property<string>("LastKnownCity")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -310,6 +313,13 @@ namespace UsluzionicaServer.Migrations
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExecuteAllowedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ExecuteAllowedById")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int>("ListingId")
                         .HasColumnType("int");

@@ -48,11 +48,24 @@ public sealed class AdminService(AppDbContext db, NotificationService notificati
                 IsPremium    = u.IsPremium,
                 IsActive     = u.IsActive,
                 TokenBalance = u.TokenBalance,
-                CreatedAt    = u.CreatedAt
+                CreatedAt    = u.CreatedAt,
+                IsTrusted    = u.IsTrusted
             })
             .ToListAsync();
 
         return (items, total);
+    }
+
+    /// <summary>
+    /// Označava nalog kao pouzdan ili skida oznaku. Važi za termine potvrđene
+    /// POSLE izmene — već potvrđenim terminima admin čekanje skida pojedinačno.
+    /// </summary>
+    public async Task<bool> SetTrustedAsync(string userId, bool trusted)
+    {
+        var izmenjeno = await db.Users
+            .Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.IsTrusted, trusted));
+        return izmenjeno > 0;
     }
 
     public async Task<bool> DeactivateUserAsync(string userId)
