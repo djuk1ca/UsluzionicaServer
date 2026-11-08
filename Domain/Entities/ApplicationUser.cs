@@ -14,6 +14,15 @@ public class ApplicationUser : IdentityUser
     public bool            IsActive        { get; set; } = true;
     public string?         ReferralCode    { get; set; }   // 8-char unique, generisan pri registraciji
 
+    /// <summary>
+    /// Admin ga je označio kao pouzdanog. Kad su OBA učesnika zakazanog termina
+    /// pouzdana, čekanje do „Izvršeno" se pri potvrdi preskače (vidi
+    /// BookingService.ConfirmAsync). Jedan pouzdan učesnik nije dovoljan:
+    /// čekanje postoji protiv para naloga u dogovoru, a nepoznata druga strana
+    /// je upravo taj rizik.
+    /// </summary>
+    public bool            IsTrusted       { get; set; } = false;
+
     // ── Ocena kao naručilac ────────────────────────────────────────────────
     // Ocene koje uslugodavci daju korisniku (posle izvršene usluge ili posla).
     // Preračunava ih ReviewService, kao ProviderProfile.AverageRating — samo

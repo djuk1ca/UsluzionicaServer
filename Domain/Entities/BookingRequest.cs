@@ -21,6 +21,23 @@ public class BookingRequest
     /// </summary>
     public DateTime?     AcceptedAt     { get; set; }
 
+    // ── Skinuto čekanje do izvršenja ───────────────────────────────────────
+    // Kad je postavljeno, ZAMENJUJE AcceptedAt + Booking:ExecuteAfterDays:
+    // „Izvršeno" je dozvoljeno od ovog trenutka. Postavlja ga admin za
+    // korisnike za koje zna da su pouzdani, ili sam server pri potvrdi kad su
+    // oba učesnika označena kao pouzdana (ApplicationUser.IsTrusted).
+    // Jedino pravilo koje to čita je BookingService.IzvrsenjeDozvoljenoOd.
+
+    /// <summary>Od kad je „Izvršeno" dozvoljeno mimo čekanja. Null = važi čekanje.</summary>
+    public DateTime?     ExecuteAllowedAt   { get; set; }
+
+    /// <summary>
+    /// Admin koji je skinuo čekanje (radi revizije). Null uz postavljen
+    /// <see cref="ExecuteAllowedAt"/> znači da je čekanje skinuto automatski,
+    /// jer su oba učesnika pouzdana.
+    /// </summary>
+    public string?       ExecuteAllowedById { get; set; }
+
     // Navigation
     public Listing           Listing          { get; set; } = null!;
     public ApplicationUser   Client           { get; set; } = null!;

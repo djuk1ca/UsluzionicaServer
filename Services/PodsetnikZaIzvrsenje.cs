@@ -21,6 +21,13 @@ namespace UsluzionicaServer.Services;
 /// ReferenceId = id zahteva), bez nove kolone u bazi. Ako uslugodavac obriše
 /// obaveštenje, podsetnik se ne ponavlja — obaveštenja se ne brišu, samo
 /// označavaju kao pročitana.
+///
+/// SKINUTO ČEKANJE
+///
+/// Rok čita isto pravilo kao BookingService.IzvrsenjeDozvoljenoOd: termin sa
+/// skinutim čekanjem (ExecuteAllowedAt) dospeva odmah. Kad čekanje skine
+/// admin, obaveštenje šalje sam BookingService, pa ovde ne stiže drugi put;
+/// kad se skine automatski (oba učesnika pouzdana), javlja se ovaj podsetnik.
 /// </summary>
 public sealed class PodsetnikZaIzvrsenje(
     AppDbContext                  db,
@@ -31,17 +38,20 @@ public sealed class PodsetnikZaIzvrsenje(
     /// <summary>Šalje sve dospele podsetnike; vraća koliko ih je poslato.</summary>
     public async Task<int> PosaljiAsync(CancellationToken ct = default)
     {
-        var dana  = bookings.ExecuteAfterDays;
-        var granica = DateTime.UtcNow.AddDays(-dana);
+        var dana    = bookings.ExecuteAfterDays;
+        var sada    = DateTime.UtcNow;
+        var granica = sada.AddDays(-dana);
 
+        // Ista logika kao BookingService.IzvrsenjeDozvoljenoOd, u SQL-u.
         var dospeli = await db.BookingRequests.AsNoTracking()
             .Where(b => b.Status == BookingStatus.Confirmed
-                     && b.AcceptedAt != null
-                     && b.AcceptedAt <= granica
+                     && ((b.ExecuteAllowedAt != null && b.ExecuteAllowedAt <= sada)
+                      || (b.ExecuteAllowedAt == null && b.AcceptedAt != null && b.AcceptedAt <= granica))
                      && !db.Notifications.Any(n => n.Kind == NotificationKind.BookingExecutable
                                                 && n.ReferenceId == b.Id
                                                 && n.UserId == b.ProviderUserId))
-            .Select(b => new { b.Id, b.ProviderUserId, Naslov = b.Listing.Title, Klijent = b.Client.FullName })
+            .Select(b => new { b.Id, b.ProviderUserId, Naslov = b.Listing.Title, Klijent = b.Client.FullName,
+                               Skinuto = b.ExecuteAllowedAt != null })
             .Take(200)
             .ToListAsync(ct);
 
@@ -51,8 +61,10 @@ public sealed class PodsetnikZaIzvrsenje(
                 z.ProviderUserId,
                 NotificationKind.BookingExecutable,
                 "Uslugu možeš označiti kao izvršenu",
-                $"Prošlo je {dana} dana od prihvatanja zahteva „{z.Naslov}“ ({z.Klijent}). " +
-                "Označi uslugu kao izvršenu — tada i ti i klijent dobijate tokene.",
+                z.Skinuto
+                    ? TekstOdmah(z.Naslov, z.Klijent)
+                    : $"Prošlo je {dana} dana od prihvatanja zahteva „{z.Naslov}“ ({z.Klijent}). " +
+                      "Označi uslugu kao izvršenu — tada i ti i klijent dobijate tokene.",
                 z.Id);
         }
 
@@ -61,4 +73,9 @@ public sealed class PodsetnikZaIzvrsenje(
 
         return dospeli.Count;
     }
+
+    /// <summary>Tekst obaveštenja kad je čekanje skinuto (admin ili pouzdani korisnici).</summary>
+    public static string TekstOdmah(string naslov, string klijent) =>
+        $"Za zahtev „{naslov}“ ({klijent}) ne moraš da čekaš — uslugu možeš odmah " +
+        "da označiš kao izvršenu. Tada i ti i klijent dobijate tokene.";
 }

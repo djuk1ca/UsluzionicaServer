@@ -10,6 +10,29 @@ public sealed class AdminUserDto
     public bool     IsActive     { get; init; }
     public decimal  TokenBalance { get; init; }
     public DateTime CreatedAt    { get; init; }
+    /// <summary>Pouzdan nalog — vidi ApplicationUser.IsTrusted.</summary>
+    public bool     IsTrusted    { get; init; }
+}
+
+/// <summary>Potvrđen termin na admin ekranu „Čekanje izvršenja".</summary>
+public sealed class AdminBookingDto
+{
+    public int       Id                   { get; init; }
+    public string    ListingTitle         { get; init; } = string.Empty;
+    public string    ClientId             { get; init; } = string.Empty;
+    public string    ClientName           { get; init; } = string.Empty;
+    public bool      ClientTrusted        { get; init; }
+    public string    ProviderUserId       { get; init; } = string.Empty;
+    public string    ProviderName         { get; init; } = string.Empty;
+    public bool      ProviderTrusted      { get; init; }
+    public DateTime? AcceptedAt           { get; init; }
+    /// <summary>Od kad je „Izvršeno" dozvoljeno (isto pravilo kao za aplikaciju).</summary>
+    public DateTime? CanExecuteAt         { get; init; }
+    public bool      CanExecute           { get; init; }
+    /// <summary>Kad je čekanje skinuto; null = važi podrazumevano čekanje.</summary>
+    public DateTime? ExecuteAllowedAt     { get; init; }
+    /// <summary>Ime admina koji je skinuo čekanje; null uz ExecuteAllowedAt = automatski (oba pouzdana).</summary>
+    public string?   ExecuteAllowedByName { get; init; }
 }
 
 public sealed class AdminListingDto

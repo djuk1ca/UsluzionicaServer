@@ -731,6 +731,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options)
         {
             e.Property(b => b.Notes).HasMaxLength(2000);
             e.Property(b => b.Status).HasConversion<string>().HasMaxLength(20);
+            // Bez FK namerno: trag revizije ne sme da spreči brisanje admin naloga.
+            e.Property(b => b.ExecuteAllowedById).HasMaxLength(450);
             e.HasIndex(b => b.ClientId);
             e.HasIndex(b => b.ProviderUserId);
             e.HasOne(b => b.Listing)

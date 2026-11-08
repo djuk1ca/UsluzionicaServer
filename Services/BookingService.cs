@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using UsluzionicaServer.Domain.Entities;
 using UsluzionicaServer.Domain.Enums;
+using UsluzionicaServer.DTOs.Admin;
 using UsluzionicaServer.DTOs.Bookings;
 using UsluzionicaServer.Persistence;
 
@@ -17,6 +18,14 @@ namespace UsluzionicaServer.Services;
 /// (AcceptedAt + ExecuteAfterDays &lt; UtcNow). Ovo sprečava farmovanje tokena:
 /// dva naloga ne mogu za par minuta da „obave" uslugu i pokupe nagradu.
 /// Kad čekanje istekne, uslugodavac dobija obaveštenje (PodsetnikZaIzvrsenje).
+///
+/// Izuzetak: admin može potvrđenom terminu da skine čekanje (pouzdani
+/// korisnici), a skida se i samo, pri potvrdi, kad su oba učesnika označena
+/// kao pouzdana. Tada BookingRequest.ExecuteAllowedAt zamenjuje
+/// AcceptedAt + ExecuteAfterDays. Rok se računa SAMO u
+/// <see cref="IzvrsenjeDozvoljenoOd"/> — server, DTO za aplikaciju i podsetnik
+/// čitaju isto pravilo. Nagrade i ocene se ne menjaju, samo trenutak od kog je
+/// „Izvršeno" dozvoljeno.
 /// </summary>
 public sealed class BookingService(
     AppDbContext         db,
@@ -47,6 +56,20 @@ public sealed class BookingService(
 
     public int ExecuteAfterDays =>
         config.GetValue<int>("Booking:ExecuteAfterDays", 7);
+
+    /// <summary>
+    /// Od kog trenutka (UTC) uslugodavac sme da označi uslugu kao izvršenu.
+    /// Skinuto čekanje (<see cref="BookingRequest.ExecuteAllowedAt"/>) ima
+    /// prednost nad AcceptedAt + ExecuteAfterDays. Null dok zahtev nije prihvaćen.
+    /// </summary>
+    public DateTime? IzvrsenjeDozvoljenoOd(BookingRequest b) =>
+        b.ExecuteAllowedAt ?? b.AcceptedAt?.AddDays(ExecuteAfterDays);
+
+    /// <summary>Da li je „Izvršeno" sada dozvoljeno (status + rok).</summary>
+    public bool MozeSeIzvrsiti(BookingRequest b, DateTime sada) =>
+        b.Status == BookingStatus.Confirmed
+        && IzvrsenjeDozvoljenoOd(b) is DateTime od
+        && sada >= od;
 
     // ── CREATE ─────────────────────────────────────────────────────────────
     /// <summary>
@@ -202,6 +225,19 @@ public sealed class BookingService(
         booking.AcceptedAt = now;
         booking.UpdatedAt  = now;
 
+        // Oba učesnika pouzdana → čekanje se preskače odmah pri potvrdi.
+        // Podsetnik (PodsetnikZaIzvrsenje) zatim javi uslugodavcu da može da
+        // označi izvršenje, kao i kad čekanje istekne.
+        var pouzdanih = await db.Users.CountAsync(u =>
+            (u.Id == booking.ClientId || u.Id == booking.ProviderUserId) && u.IsTrusted);
+        if (pouzdanih == 2)
+        {
+            booking.ExecuteAllowedAt   = now;
+            booking.ExecuteAllowedById = null;
+            logger.LogInformation(
+                "Booking #{Id}: oba učesnika pouzdana — čekanje do izvršenja preskočeno.", bookingId);
+        }
+
         await db.SaveChangesAsync();
 
         await notificationService.SendAsync(
@@ -287,7 +323,8 @@ public sealed class BookingService(
     ///
     /// Uslovi:
     ///   1. Booking mora biti Confirmed
-    ///   2. Mora proći ExecuteAfterDays dana od AcceptedAt (default: 7)
+    ///   2. Mora proći ExecuteAfterDays dana od AcceptedAt (default: 7),
+    ///      osim ako je čekanje skinuto (vidi IzvrsenjeDozvoljenoOd)
     ///
     /// Efekti:
     ///   - Kreira ServiceExecution zapis
@@ -310,13 +347,13 @@ public sealed class BookingService(
         if (booking.Status != BookingStatus.Confirmed)
             return (null, "Usluga se može označiti kao izvršena samo iz statusa 'Potvrđeno'.");
 
-        if (!booking.AcceptedAt.HasValue)
+        if (IzvrsenjeDozvoljenoOd(booking) is not DateTime dozvoljenoOd)
             return (null, "Booking nema datum prihvatanja.");
 
-        var daysSinceAccepted = (DateTime.UtcNow - booking.AcceptedAt.Value).TotalDays;
-        if (daysSinceAccepted < ExecuteAfterDays)
+        var ostalo = dozvoljenoOd - DateTime.UtcNow;
+        if (ostalo > TimeSpan.Zero)
         {
-            var daysLeft = (int)Math.Ceiling(ExecuteAfterDays - daysSinceAccepted);
+            var daysLeft = (int)Math.Ceiling(ostalo.TotalDays);
             return (null, $"Usluga se može označiti kao izvršena tek za {daysLeft} dan(a) " +
                           $"({ExecuteAfterDays} dana nakon potvrde).");
         }
@@ -409,6 +446,139 @@ public sealed class BookingService(
         return (MapToDto(booking), null);
     }
 
+    // ── ADMIN: SKIDANJE ČEKANJA ────────────────────────────────────────────
+    /// <summary>
+    /// Potvrđeni termini za admin ekran „Čekanje izvršenja", od najskorije
+    /// potvrđenih. <paramref name="samoNaCekanju"/> ostavlja samo one kojima
+    /// „Izvršeno" još nije dozvoljeno.
+    /// </summary>
+    public async Task<(List<AdminBookingDto> Items, int Total)> GetConfirmedForAdminAsync(
+        int page, int pageSize, bool samoNaCekanju)
+    {
+        pageSize = Math.Clamp(pageSize, 1, 100);
+        page     = Math.Max(page, 1);
+
+        var sada    = DateTime.UtcNow;
+        var granica = sada.AddDays(-ExecuteAfterDays);
+
+        var query = db.BookingRequests.AsNoTracking()
+            .Where(b => b.Status == BookingStatus.Confirmed);
+
+        // Isto pravilo kao IzvrsenjeDozvoljenoOd, prevedeno u SQL (skidanje
+        // je uvek „sada", pa skinuto čekanje znači da je već dozvoljeno).
+        if (samoNaCekanju)
+            query = query.Where(b => b.ExecuteAllowedAt == null && b.AcceptedAt > granica);
+
+        var total = await query.CountAsync();
+
+        var redovi = await query
+            .OrderByDescending(b => b.AcceptedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Include(b => b.Listing)
+            .Include(b => b.Client)
+            .Include(b => b.Provider)
+            .ToListAsync();
+
+        var adminIds = redovi.Select(b => b.ExecuteAllowedById).OfType<string>().Distinct().ToList();
+        var admini   = adminIds.Count == 0
+            ? new Dictionary<string, string>()
+            : await db.Users.AsNoTracking()
+                .Where(u => adminIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.FullName);
+
+        var items = redovi.Select(b => new AdminBookingDto
+        {
+            Id                   = b.Id,
+            ListingTitle         = b.Listing.Title,
+            ClientId             = b.ClientId,
+            ClientName           = b.Client.FullName,
+            ClientTrusted        = b.Client.IsTrusted,
+            ProviderUserId       = b.ProviderUserId,
+            ProviderName         = b.Provider.FullName,
+            ProviderTrusted      = b.Provider.IsTrusted,
+            AcceptedAt           = b.AcceptedAt,
+            CanExecuteAt         = IzvrsenjeDozvoljenoOd(b),
+            CanExecute           = MozeSeIzvrsiti(b, sada),
+            ExecuteAllowedAt     = b.ExecuteAllowedAt,
+            ExecuteAllowedByName = b.ExecuteAllowedById is string id
+                ? admini.GetValueOrDefault(id, "obrisan nalog")
+                : null
+        }).ToList();
+
+        return (items, total);
+    }
+
+    /// <summary>
+    /// Admin skida čekanje: „Izvršeno" je dozvoljeno odmah. Termin mora biti
+    /// potvrđen i još na čekanju. Beleži se ko je i kada, a uslugodavac odmah
+    /// dobija obaveštenje (ono ujedno zamenjuje podsetnik — šalje se jednom).
+    /// </summary>
+    public async Task<(bool Ok, string? Greska, bool NePostoji)> SkiniCekanjeAsync(
+        int bookingId, string adminId)
+    {
+        var booking = await db.BookingRequests
+            .Include(b => b.Listing)
+            .Include(b => b.Client)
+            .FirstOrDefaultAsync(b => b.Id == bookingId);
+
+        if (booking is null)
+            return (false, "Termin nije pronađen.", true);
+
+        if (booking.Status != BookingStatus.Confirmed)
+            return (false, "Čekanje se može skinuti samo potvrđenom terminu.", false);
+
+        var sada = DateTime.UtcNow;
+        if (MozeSeIzvrsiti(booking, sada))
+            return (false, "Čekanje je već isteklo — uslugodavac već može da označi izvršenje.", false);
+
+        booking.ExecuteAllowedAt   = sada;
+        booking.ExecuteAllowedById = adminId;
+        booking.UpdatedAt          = sada;
+        await db.SaveChangesAsync();
+
+        // Isti tip kao podsetnik, pa ga PodsetnikZaIzvrsenje posle ne ponavlja.
+        await notificationService.SendAsync(
+            booking.ProviderUserId,
+            NotificationKind.BookingExecutable,
+            "Uslugu možeš označiti kao izvršenu",
+            PodsetnikZaIzvrsenje.TekstOdmah(booking.Listing.Title, booking.Client.FullName),
+            booking.Id);
+
+        logger.LogInformation(
+            "Booking #{Id}: admin {AdminId} skinuo čekanje do izvršenja.", bookingId, adminId);
+        return (true, null, false);
+    }
+
+    /// <summary>
+    /// Vraća podrazumevano čekanje (AcceptedAt + ExecuteAfterDays). Ako je
+    /// uslugodavac već dobio obaveštenje „možeš označiti", ono se ne povlači,
+    /// a podsetnik se posle isteka čekanja ne šalje ponovo.
+    /// </summary>
+    public async Task<(bool Ok, string? Greska, bool NePostoji)> VratiCekanjeAsync(
+        int bookingId, string adminId)
+    {
+        var booking = await db.BookingRequests.FirstOrDefaultAsync(b => b.Id == bookingId);
+
+        if (booking is null)
+            return (false, "Termin nije pronađen.", true);
+
+        if (booking.Status != BookingStatus.Confirmed)
+            return (false, "Čekanje se može menjati samo potvrđenom terminu.", false);
+
+        if (booking.ExecuteAllowedAt is null)
+            return (false, "Termin već ima podrazumevano čekanje.", false);
+
+        booking.ExecuteAllowedAt   = null;
+        booking.ExecuteAllowedById = null;
+        booking.UpdatedAt          = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        logger.LogInformation(
+            "Booking #{Id}: admin {AdminId} vratio podrazumevano čekanje do izvršenja.", bookingId, adminId);
+        return (true, null, false);
+    }
+
     // ── HELPER ─────────────────────────────────────────────────────────────
     private BookingDto MapToDto(BookingRequest b) => new()
     {
@@ -431,9 +601,8 @@ public sealed class BookingService(
         CreatedAt      = b.CreatedAt,
         AcceptedAt     = b.AcceptedAt,
         ExecuteAfterDays = ExecuteAfterDays,
-        CanExecuteAt   = b.AcceptedAt?.AddDays(ExecuteAfterDays),
-        CanExecute     = b.Status == BookingStatus.Confirmed
-                      && b.AcceptedAt.HasValue
-                      && (DateTime.UtcNow - b.AcceptedAt.Value).TotalDays >= ExecuteAfterDays
+        CanExecuteAt   = IzvrsenjeDozvoljenoOd(b),
+        CanExecute     = MozeSeIzvrsiti(b, DateTime.UtcNow),
+        ExecuteWaitWaived = b.ExecuteAllowedAt.HasValue
     };
 }
