@@ -1,6 +1,6 @@
 # API reference
 
-77 endpoints across 15 controllers. Swagger UI is served at `/swagger` in Development, with the OpenAPI document at `/swagger/v1/swagger.json`.
+The core modules, grouped by area. The API has 134 endpoints across 22 controllers; Swagger lists all of them. Swagger UI is served at `/swagger` in Development, with the OpenAPI document at `/swagger/v1/swagger.json`.
 
 ---
 

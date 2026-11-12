@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/ci.yml/badge.svg)](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/ci.yml)
 [![CodeQL](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/codeql.yml/badge.svg)](https://github.com/djuk1ca/UsluzionicaServer/actions/workflows/codeql.yml)
-[![Coverage](https://img.shields.io/badge/line%20coverage-83.4%25-brightgreen)](docs/testing.md)
+[![Coverage](https://img.shields.io/badge/line%20coverage-86.9%25-brightgreen)](docs/testing.md)
 [![.NET](https://img.shields.io/badge/.NET-8.0-512BD4)](https://dotnet.microsoft.com/)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED)](docs/deployment.md)
 
@@ -20,16 +20,16 @@
 
 ASP.NET Core Web API powering **Uslužionica** — a marketplace where people offer and book local services (hairdressers, plumbers, tutors, movers). It handles the full lifecycle: discovery and search, real-time chat, booking negotiation, reviews, and a token economy that lets clients bargain and providers buy visibility.
 
-The mobile client is a separate .NET MAUI Blazor Hybrid app; this repository is the server it talks to.
+The mobile client is a separate .NET MAUI Blazor Hybrid app, live on [Google Play](https://play.google.com/store/apps/details?id=rs.usluzionica.app); this repository is the server it talks to.
 
 | | |
 |---|---|
-| **77 REST endpoints** | across 15 controllers, JWT-secured, role-aware |
+| **134 REST endpoints** | across 22 controllers, JWT-secured, role-aware |
 | **2 SignalR hubs** | encrypted chat and push notifications over WebSockets |
-| **20 EF Core entities** | 10 migrations, SQL Server, 188 seeded service categories |
+| **32 EF Core entities** | 21 migrations, SQL Server, 188 seeded service categories |
 | **4-tier search** | diacritic-, script- and typo-tolerant Serbian text search |
-| **227 tests** | 83.4% line coverage, gated in CI, real SQL Server via Testcontainers |
-| **2 deploy targets** | Hetzner (production) and Azure App Service, both fully automated |
+| **574 tests** | 86.9% line coverage, gated in CI, real SQL Server via Testcontainers |
+| **2 deploy targets** | Hetzner (production, deployed on every merge) and Azure App Service |
 
 ---
 
@@ -58,7 +58,7 @@ flowchart LR
     subgraph api["ASP.NET Core 8"]
         direction TB
         MW["Middleware<br/>exceptions · Serilog · CORS<br/>rate limit · JWT"]
-        CTRL["Controllers<br/>15 · 77 endpoints"]
+        CTRL["Controllers<br/>22 · 134 endpoints"]
         HUBS["SignalR hubs<br/>chat · notifications"]
         SVC["Services<br/>17 domain services"]
         BG["Background services<br/>message cleanup · boost expiry"]
@@ -68,7 +68,7 @@ flowchart LR
     end
 
     subgraph data["State"]
-        SQL[("SQL Server<br/>EF Core · 20 entities")]
+        SQL[("SQL Server<br/>EF Core · 32 entities")]
         REDIS[("Redis<br/>cache · backplane · locks<br/>presence · DP keys")]
         FS["wwwroot/uploads<br/>avatars · covers · listings"]
     end
@@ -136,7 +136,7 @@ Then bring the stack up:
 docker compose up -d
 ```
 
-First boot applies 10 migrations and seeds 188 categories, which takes 60–90 seconds; the healthcheck's `start_period` accounts for that.
+First boot applies 21 migrations and seeds 188 categories, which takes 60–90 seconds; the healthcheck's `start_period` accounts for that.
 
 ```bash
 curl http://localhost:8080/health
@@ -177,11 +177,11 @@ The first command runs everything; the second runs only the fast unit suite, whi
 ## Repository map
 
 ```
-├── Controllers/        15 thin HTTP controllers → 77 endpoints
-├── Services/           17 domain services — all business rules live here
+├── Controllers/        22 thin HTTP controllers → 134 endpoints
+├── Services/           domain services — all business rules live here
 ├── Domain/
-│   ├── Entities/       20 EF Core entities
-│   └── Enums/          8 domain enums
+│   ├── Entities/       32 EF Core entities
+│   └── Enums/          17 domain enums
 ├── DTOs/               request/response contracts, grouped by module
 ├── Hubs/               ChatHub, NotificationHub
 ├── Infrastructure/
@@ -195,7 +195,7 @@ The first command runs everything; the second runs only the fast unit suite, whi
 │   └── SecretsGuard.cs           startup validation of required secrets
 ├── Middleware/         global exception handling
 ├── Persistence/        AppDbContext — schema, indexes, delete behaviour
-├── Migrations/         10 EF Core migrations
+├── Migrations/         21 EF Core migrations
 ├── tests/              unit + integration suites
 ├── docs/               this documentation
 └── .github/workflows/  ci · codeql · cd-hetzner · cd-azure
@@ -209,7 +209,7 @@ The first command runs everything; the second runs only the fast unit suite, whi
 |---|---|
 | [Architecture](docs/architecture.md) | Layers, request lifecycle, startup sequence, why there is no repository layer |
 | [Domain model](docs/domain-model.md) | Entities, relationships, ER diagram, key constraints and indexes |
-| [API reference](docs/api-reference.md) | All 77 endpoints with auth requirements and rate limits |
+| [API reference](docs/api-reference.md) | Endpoints by module, with auth requirements and rate limits |
 | [Search engine](docs/search.md) | Four-tier search, folding, transliteration, fuzzy matching, index maintenance |
 | [Token economy](docs/token-economy.md) | Earning, spending, boosting, referrals, and the anti-abuse rules |
 | [Real-time](docs/realtime.md) | SignalR hubs, JWT over WebSockets, groups, presence, message encryption |
