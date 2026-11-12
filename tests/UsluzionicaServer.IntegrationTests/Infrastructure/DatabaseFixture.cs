@@ -33,8 +33,8 @@ public sealed class DatabaseFixture : IAsyncLifetime
         // jednom sa jasnom porukom.
         try
         {
-            _container = new MsSqlBuilder()
-                .WithImage("mcr.microsoft.com/mssql/server:2022-latest")
+            // Slika ide u konstruktor — prazan konstruktor je od Testcontainers 4.x zastareo.
+            _container = new MsSqlBuilder("mcr.microsoft.com/mssql/server:2022-latest")
                 .Build();
 
             await _container.StartAsync();
