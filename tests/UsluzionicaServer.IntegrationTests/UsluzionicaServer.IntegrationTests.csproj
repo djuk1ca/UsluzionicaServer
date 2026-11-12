@@ -21,13 +21,13 @@
   <ItemGroup>
     <!-- Verzija MORA pratiti ASP.NET Core verziju servera (8.x) — inače
          WebApplicationFactory ne ume da pokrene host. -->
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.34" />
 
     <!-- Podiže pravi SQL Server u kontejneru. Alternativa (EF InMemory) nije
          baza nego rečnik u memoriji: ne poštuje unique indekse, ne podržava
          ExecuteDeleteAsync i ne izvršava SQL — za pretragu koja zavisi od
          LIKE i collation-a davala bi lažno zeleno. -->
-    <PackageReference Include="Testcontainers.MsSql" Version="4.0.0" />
+    <PackageReference Include="Testcontainers.MsSql" Version="4.16.0" />
 
     <!-- Briše redove između testova, ali čuva referentne podatke
          (188 kategorija iz HasData, Identity role). Brže i pouzdanije od
