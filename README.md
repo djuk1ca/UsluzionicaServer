@@ -20,7 +20,7 @@
 
 ASP.NET Core Web API powering **Uslužionica** — a marketplace where people offer and book local services (hairdressers, plumbers, tutors, movers). It handles the full lifecycle: discovery and search, real-time chat, booking negotiation, reviews, and a token economy that lets clients bargain and providers buy visibility.
 
-The mobile client is a separate .NET MAUI Blazor Hybrid app, live on [Google Play](https://play.google.com/store/apps/details?id=rs.usluzionica.app); this repository is the server it talks to.
+The clients are a .NET MAUI Blazor Hybrid app, live on [Google Play](https://play.google.com/store/apps/details?id=rs.usluzionica.app) and the [App Store](https://apps.apple.com/rs/app/uslu%C5%BEionica/id6822725859), and a Blazor Web App at [usluzionica.rs](https://usluzionica.rs); this repository is the server they talk to.
 
 | | |
 |---|---|
