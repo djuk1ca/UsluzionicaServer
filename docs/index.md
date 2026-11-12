@@ -7,8 +7,8 @@ Everything about how the Uslužionica backend works, why it works that way, and 
 | | |
 |---|---|
 | [Architecture](architecture.md) | Layers, startup sequence, middleware pipeline, request lifecycle, and why there is no repository layer |
-| [Domain model](domain-model.md) | 20 entities, their relationships, the constraints that encode business rules, and the indexes behind the hot queries |
-| [API reference](api-reference.md) | All 77 endpoints grouped by module, with access levels, rate limits and response conventions |
+| [Domain model](domain-model.md) | Entities, their relationships, the constraints that encode business rules, and the indexes behind the hot queries |
+| [API reference](api-reference.md) | Endpoints grouped by module, with access levels, rate limits and response conventions |
 
 ## Subsystems
 

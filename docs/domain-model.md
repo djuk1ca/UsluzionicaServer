@@ -1,6 +1,6 @@
 # Domain model
 
-20 entities, mapped with EF Core against SQL Server. Configuration lives in a single place — `Persistence/AppDbContext.cs` — with no attribute-based mapping scattered across the entity classes.
+The core entities, mapped with EF Core against SQL Server. There are 32 in total; this page covers the ones that carry the main business rules. Configuration lives in a single place — `Persistence/AppDbContext.cs` — with no attribute-based mapping scattered across the entity classes.
 
 ---
 
